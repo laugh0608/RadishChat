@@ -1,0 +1,77 @@
+RadishChat Source-Available License
+Version 1.0, November 14, 2026
+
+Copyright (c) 2026 RadishChat Project Owner. All rights reserved.
+
+1. Scope
+
+This license covers the original RadishChat software and documentation that
+the copyright owner makes available under these terms (the Project).
+Third-party material and separately licensed components remain subject to
+their own terms. Statutory rights and permissions granted by applicable
+hosting-platform terms continue to apply.
+
+2. Use and self-hosting
+
+Subject to these terms, the copyright owner grants individuals and
+organizations a worldwide, non-exclusive, royalty-free license to download,
+copy, build, install, run, privately modify, and back up the Project for:
+
+- Personal use and study, including local development and evaluation.
+- Self-hosted chat for yourself, your household, a group or community whose
+  members you admit, or your organization's own workforce. Members may
+  access that instance and run project-provided clients to connect to it.
+  The instance may serve its bundled web client in the normal course of
+  providing that access.
+
+An organization may use the Project for its own internal work, including
+commercial work. You may pay for hosting infrastructure for a permitted
+instance. The instance may be reachable over the internet if admission is
+controlled by the operator and restricted to the intended members.
+
+3. Uses requiring separate authorization
+
+Prior written permission from the copyright owner is required to:
+
+- Redistribute or mirror the Project or any modified version, including
+  source code, binaries, container images, and installation packages.
+- Offer the Project to others as a paid or revenue-generating hosted chat
+  service, or operate managed RadishChat deployments for customers.
+- Operate a public chat service with unrestricted registration.
+
+Keep copyright, attribution, and license notices in permitted copies and
+modifications. Use of the Project does not grant rights to use the RadishChat
+name or marks to brand an unofficial distribution or service.
+
+4. Instance data and interoperability
+
+This license covers the software and documentation. It does not grant the
+copyright owner rights to messages, attachments, account data, or other
+content stored in an instance. It does not restrict lawful access, backup,
+export, or transfer of instance data by those entitled to do so.
+
+You may use publicly documented RadishChat interfaces to build and distribute
+independent interoperable clients, bots, and tools. Any inclusion of Project
+code or documentation remains subject to the licensing terms for that
+material.
+
+5. Contributions
+
+By submitting a contribution for inclusion in the Project, you represent
+that you have the right to submit it and grant the copyright owner a
+worldwide, perpetual, irrevocable, non-exclusive, royalty-free license to
+use, reproduce, modify, distribute, and relicense the contribution, unless
+otherwise agreed in writing. You retain copyright in your contribution.
+
+6. Warranty and liability
+
+THE PROJECT IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR
+PURPOSE, AND NON-INFRINGEMENT. TO THE EXTENT PERMITTED BY APPLICABLE LAW,
+THE COPYRIGHT OWNER AND CONTRIBUTORS ARE NOT LIABLE FOR CLAIMS, DAMAGES,
+OR OTHER LIABILITY ARISING FROM THE PROJECT OR ITS USE.
+
+7. Licensing contact
+
+For redistribution, commercial hosting, or other separate licensing requests,
+contact luobo@radishx.com.
