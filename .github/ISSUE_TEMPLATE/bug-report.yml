@@ -1,0 +1,20 @@
+name: 问题反馈
+description: 报告日常聊天、账号、客户端或自部署问题
+body:
+  - type: markdown
+    attributes:
+      value: 请使用合成消息和脱敏日志。安全问题请查看仓库的 SECURITY.md。
+  - type: textarea
+    id: context
+    attributes:
+      label: 版本与使用环境
+      description: 说明版本、Web 或移动平台以及自部署方式。
+    validations:
+      required: true
+  - type: textarea
+    id: behavior
+    attributes:
+      label: 操作步骤与实际结果
+      description: 说明观察到的行为和原本的预期。
+    validations:
+      required: true

@@ -1,0 +1,24 @@
+services:
+  chat:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    environment:
+      RADISHCHAT_PUBLIC_URL: ${RADISHCHAT_PUBLIC_URL:-http://127.0.0.1:8080}
+      RADISHCHAT_REGISTRATION: ${RADISHCHAT_REGISTRATION:-on}
+      RADISHCHAT_OIDC_ISSUER: ${RADISHCHAT_OIDC_ISSUER:-}
+      RADISHCHAT_OIDC_CLIENT_ID: ${RADISHCHAT_OIDC_CLIENT_ID:-}
+      RADISHCHAT_OIDC_CLIENT_AUTH: ${RADISHCHAT_OIDC_CLIENT_AUTH:-}
+      RADISHCHAT_OIDC_CLIENT_SECRET: ${RADISHCHAT_OIDC_CLIENT_SECRET:-}
+    ports:
+      - "127.0.0.1:${RADISHCHAT_PORT:-8080}:8080"
+    volumes:
+      - chat-data:/data
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+volumes:
+  chat-data:

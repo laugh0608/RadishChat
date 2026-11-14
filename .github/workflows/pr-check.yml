@@ -1,0 +1,36 @@
+name: PR Checks
+
+on:
+  pull_request:
+    branches:
+      - dev
+      - master
+
+permissions:
+  contents: read
+
+jobs:
+  repo-hygiene:
+    name: Repo Hygiene
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Check repository and PR range
+        env:
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+        run: python3 scripts/check-repo.py --base "$PR_BASE" --head "$PR_HEAD"
+
+  candidate-quality:
+    name: Candidate Quality
+    runs-on: ubuntu-latest
+    needs: repo-hygiene
+    if: ${{ always() }}
+    steps:
+      - name: Require all checks to succeed
+        env:
+          HYGIENE: ${{ needs.repo-hygiene.result }}
+        run: test "$HYGIENE" = success

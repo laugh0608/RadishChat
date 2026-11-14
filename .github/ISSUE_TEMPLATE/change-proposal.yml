@@ -1,0 +1,17 @@
+name: 功能或规则建议
+description: 讨论聊天、自部署、客户端或仓库治理
+body:
+  - type: textarea
+    id: use-case
+    attributes:
+      label: 使用场景与需求
+      description: 说明谁遇到了什么问题。
+    validations:
+      required: true
+  - type: textarea
+    id: outcome
+    attributes:
+      label: 建议行为与完成标准
+      description: 可附对应的专题与影响范围。
+    validations:
+      required: true
