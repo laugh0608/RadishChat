@@ -47,4 +47,8 @@ GitHub API 核对了合并选项与 [Ruleset 27258912](https://github.com/laugh0
 
 首次 [dev → master PR #1](https://github.com/laugh0608/RadishChat/pull/1) 的提交 `1c6dedd` 在检查结果产生前被 GitHub 标为 `BLOCKED`。[PR Checks 运行 43585365838](https://github.com/laugh0608/RadishChat/actions/runs/43585365838) 的 `Repo Hygiene` 和 `Candidate Quality` 均通过。
 
-从 `Candidate Quality` 检查记录取得 GitHub Actions App ID `15368`，写入远端 Ruleset 的 `integration_id`，并从 `master` 的有效分支规则读回核对。绑定后，GitHub 仍将该检查识别为必需且通过，PR 状态为 `CLEAN` 和 `MERGEABLE`。验证停在合并资格检查，PR 保持开放。
+从 `Candidate Quality` 检查记录取得 GitHub Actions App ID `15368`，写入远端 Ruleset 的 `integration_id`，并从 `master` 的有效分支规则读回核对。绑定后，GitHub 仍将该检查识别为必需且通过，PR 状态为 `CLEAN` 和 `MERGEABLE`。当时保留 PR 开放供维护者审阅。
+
+维护者授权合并后，先核对 PR 最终提交 `d986860` 的 [PR Checks 运行 43585545287](https://github.com/laugh0608/RadishChat/actions/runs/43585545287) 两项检查通过，再以 merge commit `5df5091` 合入 `master`。本地 `master` 拉取至该提交，`dev` 从 `d986860` 快进至 `5df5091`，回流的文件内容与原 `dev` 相同。`python3 scripts/check-repo.py` 通过后推送 `dev`，`git ls-remote --symref` 确认远端两分支同指 `5df5091`，`HEAD` 仍指向 `master`。
+
+2026-11-14，维护者确认以草案为准采用 [RadishChat Source-Available License 1.0](../../LICENSE)，覆盖有权授权的原创软件和文档。许可证授予个人、受控群组及组织内部的自部署权，并明确商业托管、代运营、开放注册的公共服务和软件再分发需单独授权。第三方许可、实例数据和独立互操作的范围分别在根许可证中说明。

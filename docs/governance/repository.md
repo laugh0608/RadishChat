@@ -7,7 +7,7 @@
 | `.editorconfig` 与 `.gitattributes` | 统一自有文本 UTF-8、LF 和结尾换行，Go 格式由 gofmt 管理 |
 | `.gitignore` | 排除依赖、构建、测试、SQLite、运行数据和本机配置 |
 | `AGENTS.md` 与 `CLAUDE.md` | 全文一致的协作入口，由仓库检查校验同步 |
-| 贡献指南、行为规范与安全政策 | 说明贡献、社区行为、私密报告路径和项目许可状态 |
+| [许可](../../LICENSE)、贡献指南、行为规范与安全政策 | 说明项目许可、贡献、社区行为与私密报告路径 |
 | Issue Forms 与 PR 模板 | 提供能定位问题的最小上下文、变更意图、验证和回流安排 |
 | Ruleset 模板与 PR 工作流 | 约定稳定主线保护与 `Candidate Quality` |
 | `scripts/check-repo.py` | 检查必需文件、活跃 Markdown 链接、文本卫生，以及本地声明的模板和 CI 契约 |
@@ -28,4 +28,4 @@ python3 scripts/check-repo.py
 python3 scripts/check-repo.py --base <base-sha> --head <head-sha>
 ```
 
-仓库可见性和项目许可由维护者确定。准备公开接收贡献时补齐许可、所有权与正式报告入口。依赖许可及保留的通知属于发行材料，按实际依赖核对。
+仓库可见性由维护者确定。项目使用与贡献授权以[根 LICENSE](../../LICENSE)为准。正式发行时按实际产物核对第三方依赖的许可与须保留的通知。

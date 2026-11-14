@@ -13,4 +13,6 @@ RadishChat 是 Radish 系列独立的在线即时通讯项目，面向朋友、�
 | 查看原型和本地验证 | [探索预览启动说明](docs/records/2026-11-14-preview-quickstart.md) · [原型验证记录](docs/status/2026-11-14-preview-verification.md) |
 | 完整导航 | [文档入口](docs/README.md) |
 
-项目当前在本地筹备。许可、公开贡献入口及正式发行方式由维护者决定。
+## 许可
+
+本项目原创软件和文档采用 [RadishChat Source-Available License 1.0](LICENSE)。许可允许个人、受控群组和组织内部自部署。商业托管、代运营、开放注册的公共服务和软件再分发需单独授权。第三方材料保留各自的许可。
