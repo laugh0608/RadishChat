@@ -36,3 +36,15 @@
 后续将复核扩大到本机 16 个其他 Radish 系列项目的现行仓库入口，包含 `RadishIntelligence/RadishUI`。16 个项目都明确规定提交不添加 AI 署名。RadishChat 同步补入按授权精确暂存、按主题提交、保留共享历史、生成物可追溯及按实际证据交接等共用约定。
 
 逐字节比较发现 11 组文件完全一致。RadishForge 和 RadishInk 的差异在标题，RadishCatalyst 和 RadishX 的差异在首段适用对象，RadishUI 的标题和首段均有差异。5 组均保留完整规则正文。RadishAxiomChecker 的两份入口均为 11 行且完全一致。
+
+<a id="remote-bootstrap"></a>
+
+## 远端分支与规则启用
+
+2026-11-14 将初始提交 `8438d2117e0ea4cad69b4fff6869a1adf5c15c15` 推送到 [GitHub 仓库](https://github.com/laugh0608/RadishChat) 的 `master` 与 `dev`。`git ls-remote --symref` 核对两分支同一 SHA，远端 `HEAD` 指向 `refs/heads/master`。
+
+GitHub API 核对了合并选项与 [Ruleset 27258912](https://github.com/laugh0608/RadishChat/rules/27258912)。远端允许 merge commit 和 rebase merge，关闭 squash merge 与合并后自动删除分支。Ruleset 处于 `active`，仅匹配 `master`，无绕过主体。应用到分支的规则包括禁止删除、禁止强推、必须通过 PR 且解决评审会话、严格要求 `Candidate Quality`。`dev` 返回空的分支规则列表。
+
+首次 [dev → master PR #1](https://github.com/laugh0608/RadishChat/pull/1) 的提交 `1c6dedd` 在检查结果产生前被 GitHub 标为 `BLOCKED`。[PR Checks 运行 43585365838](https://github.com/laugh0608/RadishChat/actions/runs/43585365838) 的 `Repo Hygiene` 和 `Candidate Quality` 均通过。
+
+从 `Candidate Quality` 检查记录取得 GitHub Actions App ID `15368`，写入远端 Ruleset 的 `integration_id`，并从 `master` 的有效分支规则读回核对。绑定后，GitHub 仍将该检查识别为必需且通过，PR 状态为 `CLEAN` 和 `MERGEABLE`。验证停在合并资格检查，PR 保持开放。
