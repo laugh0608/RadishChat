@@ -45,4 +45,6 @@
 
 GitHub API 核对了合并选项与 [Ruleset 27258912](https://github.com/laugh0608/RadishChat/rules/27258912)。远端允许 merge commit 和 rebase merge，关闭 squash merge 与合并后自动删除分支。Ruleset 处于 `active`，仅匹配 `master`，无绕过主体。应用到分支的规则包括禁止删除、禁止强推、必须通过 PR 且解决评审会话、严格要求 `Candidate Quality`。`dev` 返回空的分支规则列表。
 
-Actions 已启用，`master` 上可读取 `pr-check.yml`。核对时工作流运行数为零。首次 PR 后复验 `Candidate Quality` 的检查名、GitHub Actions 来源及实际合并门禁，再记录来源绑定结果。
+首次 [dev → master PR #1](https://github.com/laugh0608/RadishChat/pull/1) 的提交 `1c6dedd` 在检查结果产生前被 GitHub 标为 `BLOCKED`。[PR Checks 运行 43585365838](https://github.com/laugh0608/RadishChat/actions/runs/43585365838) 的 `Repo Hygiene` 和 `Candidate Quality` 均通过。
+
+从 `Candidate Quality` 检查记录取得 GitHub Actions App ID `15368`，写入远端 Ruleset 的 `integration_id`，并从 `master` 的有效分支规则读回核对。绑定后，GitHub 仍将该检查识别为必需且通过，PR 状态为 `CLEAN` 和 `MERGEABLE`。验证停在合并资格检查，PR 保持开放。
