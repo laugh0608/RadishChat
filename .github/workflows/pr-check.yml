@@ -24,13 +24,52 @@ jobs:
           PR_HEAD: ${{ github.event.pull_request.head.sha }}
         run: python3 scripts/check-repo.py --base "$PR_BASE" --head "$PR_HEAD"
 
+  go-checks:
+    name: Go Checks
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: go.mod
+          cache-dependency-path: go.sum
+      - name: Run Go tests with the race detector
+        run: go test -mod=readonly -count=1 -race ./...
+      - name: Run go vet
+        run: go vet -mod=readonly ./...
+
+  web-checks:
+    name: Web Checks
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: web
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v6
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install Web dependencies
+        run: npm ci --no-audit --no-fund
+      - name: Type-check and build Web for production
+        run: npm run build
+
   candidate-quality:
     name: Candidate Quality
     runs-on: ubuntu-latest
-    needs: repo-hygiene
+    needs: [repo-hygiene, go-checks, web-checks]
     if: ${{ always() }}
     steps:
       - name: Require all checks to succeed
+        if: ${{ always() }}
         env:
           HYGIENE: ${{ needs.repo-hygiene.result }}
-        run: test "$HYGIENE" = success
+          GO_CHECKS: ${{ needs.go-checks.result }}
+          WEB_CHECKS: ${{ needs.web-checks.result }}
+        run: test "$HYGIENE" = success && test "$GO_CHECKS" = success && test "$WEB_CHECKS" = success

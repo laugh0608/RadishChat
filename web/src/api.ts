@@ -1,17 +1,20 @@
 export type Account = {id: number; username: string; displayName: string};
-export type Room = {id: number; kind: 'direct' | 'group'; name: string; peerUsername?: string; ownerId?: number; memberCount: number; lastMessageId: number};
+export type Room = {id: number; kind: 'direct' | 'group'; name: string; peerUsername?: string; ownerId?: number; memberCount: number; lastMessageId: number; membershipId: string};
 export type Message = {id: number; author: Account; markdown: string; sentAt: number};
 export type Page = {messages: Message[]; more: boolean};
-export type Info = {registration: boolean; radishLogin: boolean};
+export type Info = {registration: boolean; registrationInviteRequired?: boolean; radishLogin: boolean};
 
 export class RequestError extends Error {
   constructor(readonly status: number, message: string) { super(message); }
 }
 
-export async function api<T>(path: string, method = 'GET', data?: unknown, signal?: AbortSignal): Promise<T> {
+export async function api<T>(path: string, method = 'GET', data?: unknown, signal?: AbortSignal, membershipId?: string): Promise<T> {
+  const headers = new Headers();
+  if (data !== undefined) headers.set('Content-Type', 'application/json');
+  if (membershipId) headers.set('X-RadishChat-Membership', membershipId);
   const result = await fetch(`/api/v1${path}`, {
-    method, signal, cache: 'no-store', credentials: 'same-origin',
-    ...(data === undefined ? {} : {headers: {'Content-Type': 'application/json'}, body: JSON.stringify(data)}),
+    method, signal, headers, cache: 'no-store', credentials: 'same-origin',
+    body: data === undefined ? undefined : JSON.stringify(data),
   });
   if (!result.ok) {
     const body = await result.json().catch(() => ({}));

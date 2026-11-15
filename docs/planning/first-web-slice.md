@@ -64,6 +64,6 @@
 | 干净安装与 HTTPS 实时收发 | 按部署说明使用完整构建的候选产物安装，经 HTTPS 复现实例健康检查、普通账号收发与断线恢复 | [OPS-01](../topics/deployment.md#ops-01) · [MSG-02](../topics/messaging.md#msg-02) |
 | 备份、迁移和恢复 | 从干净安装的数据备份恢复到新目录，核对账号、成员和消息，旧会话失效并可重新登录。验证固定版本的合成预览 v1 库迁移至候选版本，并演练迁移失败后的备份恢复 | [OPS-01](../topics/deployment.md#ops-01) · [AUTH-01](../topics/identity.md#auth-01) |
 | 普通会话的内容与访问说明 | 用户能辨认服务端可读的会话。实时信号不携带正文或会话标识，日志与备份按隐私边界验收 | [WEB-01](../topics/clients.md#web-01) · [MSG-02](../topics/messaging.md#msg-02) · [OPS-01](../topics/deployment.md#ops-01) |
-| 候选版本检查 | 从干净检出完成 Go 检查、Web 生产构建和候选镜像构建。产品检查纳入 `Candidate Quality` | [BASE-03](../topics/foundation.md#base-03) |
+| 候选版本检查 | 从干净检出完成 Go 测试与 `go vet`、Web 类型检查与生产构建，并验证 `Candidate Quality` 汇总结果。候选镜像另外记录完整构建证据 | [BASE-03](../topics/foundation.md#base-03) |
 
 批次结论须关联实际运行版本、隔离数据、环境和测试结果。当前为已确认的合同和验收标准，候选版本的验收结果由各主子专题记录。

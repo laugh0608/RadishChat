@@ -136,7 +136,7 @@ func readSync(t *testing.T, r *bufio.Reader) {
 }
 
 func TestRoomsRealtimeAndPermissions(t *testing.T) {
-	i := newInstance(t, Config{})
+	i := newInstance(t, Config{Registration: RegistrationOpen})
 	a, alice := addUser(t, i.host.URL, "alice")
 	b, bob := addUser(t, i.host.URL, "bob")
 	c, _ := addUser(t, i.host.URL, "carol")
@@ -176,8 +176,8 @@ func TestRoomsRealtimeAndPermissions(t *testing.T) {
 	call(t, a, i.host.URL, "POST", group+"/messages", body, 201)
 	call(t, a, i.host.URL, "POST", group+"/members", map[string]string{"username": "carol"}, 204)
 	call(t, c, i.host.URL, "GET", group+"/messages", nil, 200, &page)
-	if len(page.Messages) != 1 {
-		t.Fatal("new member cannot see existing history")
+	if len(page.Messages) != 0 || page.More {
+		t.Fatal("new member can see messages sent before joining")
 	}
 	call(t, c, i.host.URL, "POST", group+"/leave", nil, 204)
 	call(t, c, i.host.URL, "GET", group+"/members", nil, 404)
@@ -191,7 +191,7 @@ func TestRoomsRealtimeAndPermissions(t *testing.T) {
 }
 
 func TestDataPersistsAndInstanceOrigin(t *testing.T) {
-	i := newInstance(t, Config{})
+	i := newInstance(t, Config{Registration: RegistrationOpen})
 	c, _ := addUser(t, i.host.URL, "alice")
 	var result map[string]int64
 	call(t, c, i.host.URL, "POST", "/rooms/group", map[string]any{"name": "持久化"}, 201, &result)
@@ -222,7 +222,7 @@ func TestDataPersistsAndInstanceOrigin(t *testing.T) {
 }
 
 func TestPagination(t *testing.T) {
-	i := newInstance(t, Config{})
+	i := newInstance(t, Config{Registration: RegistrationOpen})
 	c, _ := addUser(t, i.host.URL, "alice")
 	var result map[string]int64
 	call(t, c, i.host.URL, "POST", "/rooms/group", map[string]any{"name": "分页"}, 201, &result)
@@ -245,6 +245,31 @@ func TestPagination(t *testing.T) {
 	}
 }
 
+func TestRadishOIDCDisabled(t *testing.T) {
+	i := newInstance(t, Config{})
+	c := browser(t)
+	var info struct{ RadishLogin *bool }
+	call(t, c, i.host.URL, "GET", "/info", nil, http.StatusOK, &info)
+	if info.RadishLogin == nil || *info.RadishLogin {
+		t.Fatal("the default instance must advertise radishLogin=false")
+	}
+	for _, endpoint := range []struct{ method, path string }{
+		{"POST", "/auth/radish/start"},
+		{"GET", "/auth/radish/callback?code=fixture&state=fixture"},
+	} {
+		res := call(t, c, i.host.URL, endpoint.method, endpoint.path, nil, http.StatusNotFound)
+		if len(res.Cookies()) != 0 || res.Header.Get("Location") != "" {
+			t.Fatalf("disabled OIDC endpoint %s issued a cookie or redirect", endpoint.path)
+		}
+	}
+	var flows, sessions int
+	err := i.s.db.QueryRow("SELECT (SELECT COUNT(*) FROM oidc_flows), (SELECT COUNT(*) FROM sessions)").Scan(&flows, &sessions)
+	if err != nil || flows != 0 || sessions != 0 {
+		t.Fatalf("disabled OIDC left %d authorization flows and %d sessions: %v", flows, sessions, err)
+	}
+	call(t, c, i.host.URL, "GET", "/me", nil, http.StatusUnauthorized)
+}
+
 func TestRadishOIDCBrowserFlow(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
@@ -258,6 +283,7 @@ func TestRadishOIDCBrowserFlow(t *testing.T) {
 	var mu sync.Mutex
 	var config flowData
 	var expectedNonceBad bool
+	subject := "radish-user"
 	var issuer string
 	mux := http.NewServeMux()
 	provider := httptest.NewUnstartedServer(mux)
@@ -283,7 +309,7 @@ func TestRadishOIDCBrowserFlow(t *testing.T) {
 			nonce = "different"
 		}
 		now := time.Now()
-		claims, _ := json.Marshal(map[string]any{"iss": issuer, "sub": "radish-user", "aud": "test-app", "exp": now.Add(time.Minute).Unix(), "iat": now.Unix(), "nonce": nonce,
+		claims, _ := json.Marshal(map[string]any{"iss": issuer, "sub": subject, "aud": "test-app", "exp": now.Add(time.Minute).Unix(), "iat": now.Unix(), "nonce": nonce,
 			"name": "Alice via Radish", "preferred_username": "alice"})
 		signed, _ := signer.Sign(claims)
 		compact, _ := signed.CompactSerialize()
@@ -291,7 +317,7 @@ func TestRadishOIDCBrowserFlow(t *testing.T) {
 	})
 	provider.Start()
 	defer provider.Close()
-	i := newInstance(t, Config{OIDCIssuer: issuer, OIDCClientID: "test-app", OIDCSecret: "fixture"})
+	i := newInstance(t, Config{Registration: RegistrationOpen, OIDCIssuer: issuer, OIDCClientID: "test-app", OIDCSecret: "fixture"})
 	_, local := addUser(t, i.host.URL, "alice")
 	client := browser(t)
 	begin := func() string {
@@ -334,4 +360,25 @@ func TestRadishOIDCBrowserFlow(t *testing.T) {
 	expectedNonceBad = true
 	mu.Unlock()
 	redirect(client, begin(), "/?login=invalid")
+
+	i.host.Close()
+	i.s.Close()
+	cfg := i.cfg
+	cfg.Registration, cfg.InviteCode = RegistrationInvite, fixtureInvite
+	i = newInstance(t, cfg)
+	mu.Lock()
+	expectedNonceBad = false
+	mu.Unlock()
+	client = browser(t)
+	redirect(client, begin(), "/")
+	call(t, client, i.host.URL, "GET", "/me", nil, 200, &second)
+	if first != second {
+		t.Fatal("existing external account cannot log in with invite-only registration")
+	}
+	mu.Lock()
+	subject = "unregistered-radish-user"
+	mu.Unlock()
+	client = browser(t)
+	redirect(client, begin(), "/?login=closed")
+	call(t, client, i.host.URL, "GET", "/me", nil, 401)
 }

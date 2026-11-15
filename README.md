@@ -1,6 +1,6 @@
 # RadishChat · 萝卜聊天
 
-RadishChat 是 Radish 系列独立的在线即时通讯项目，面向朋友、小团队和开发者社区，专注私聊、群组和 Markdown 消息。每个实例可以自部署并开放本地注册，也可接入 Radish 账号。计划采用 Go 服务端和 React Web，后续 Flutter 官方客户端支持连接用户指定的实例。
+RadishChat 是 Radish 系列独立的在线即时通讯软件，专注日常私聊、小群聊天和 Markdown 消息。每个实例可以自部署并开放本地注册，也可接入 Radish 账号。计划采用 Go 服务端和 React Web，后续 Flutter 官方客户端支持连接用户指定的实例。
 
 现在处于 P1 实施阶段，已完成本地检查基线和预览 v1 迁移样本。首批功能进度见当前状态。
 
@@ -11,6 +11,7 @@ RadishChat 是 Radish 系列独立的在线即时通讯项目，面向朋友、�
 | 当前顺序、待决定事项和已知证据 | [当前状态](docs/status/current.md) |
 | 协作、分支、PR、CI 和 Rulesets | [协作约定](AGENTS.md) · [贡献指南](CONTRIBUTING.md) · [仓库治理](docs/governance/repository.md) |
 | 查看原型和本地验证 | [探索预览启动说明](docs/records/2026-11-14-preview-quickstart.md) · [原型验证记录](docs/status/2026-11-14-preview-verification.md) |
+| 部署候选镜像和复跑 HTTPS 验收 | [部署说明](deploy/README.md) |
 | 完整导航 | [文档入口](docs/README.md) |
 
 ## 许可

@@ -1,3 +1,5 @@
+# Set RADISHCHAT_PUBLIC_URL to https://chat.example.com in Compose.
+# This example runs Caddy on the same host as the Compose project.
 chat.example.com {
     reverse_proxy 127.0.0.1:8080 {
         flush_interval -1

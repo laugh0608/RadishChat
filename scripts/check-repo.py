@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Validate the RadishChat planning baseline and optional PR commit range."""
+"""Validate the RadishChat repository contract and optional PR commit range."""
 
 import argparse
 from collections import Counter
@@ -16,7 +16,7 @@ REQUIRED = (
     ".github/PULL_REQUEST_TEMPLATE.md", ".github/ISSUE_TEMPLATE/config.yml",
     ".github/ISSUE_TEMPLATE/bug-report.yml", ".github/ISSUE_TEMPLATE/change-proposal.yml",
     ".github/rulesets/README.md", ".github/rulesets/master-protection.json",
-    ".github/workflows/pr-check.yml", "docs/README.md", "docs/status/current.md",
+    ".github/workflows/pr-check.yml", "web/package.json", "docs/README.md", "docs/status/current.md",
     "docs/planning/project-plan.md", "docs/topics/README.md",
     "docs/governance/collaboration.md", "docs/governance/repository.md",
     "docs/adr/0002-branch-pr-rulesets.md",
@@ -85,6 +85,48 @@ def link_problems(path, text):
                     yield f"{path.relative_to(ROOT)}: unresolved anchor {link}"
 
 
+def workflow_problems(workflow):
+    header, _, jobs = workflow.partition("\njobs:\n")
+    if not re.search(r"(?m)^  pull_request:\n    branches:\n      - dev\n      - master$", header):
+        yield "PR Checks must target dev and master."
+    if re.search(r"(?m)^  (push|pull_request_target):", header):
+        yield "PR Checks must run only in its declared pull request context."
+    if not re.search(r"(?m)^permissions:\n  contents: read$", header):
+        yield "PR Checks must declare read-only content permissions."
+
+    job_blocks = re.split(r"(?m)^  ([a-z][a-z0-9-]*):\n", jobs)[1:]
+    jobs_by_id = dict(zip(job_blocks[::2], job_blocks[1::2]))
+    gate_results = {"repo-hygiene": "HYGIENE", "go-checks": "GO_CHECKS", "web-checks": "WEB_CHECKS"}
+    dependencies = ", ".join(gate_results)
+    success_tests = " && ".join(f'test "${variable}" = success' for variable in gate_results.values())
+    candidate = jobs_by_id.get("candidate-quality", "")
+    gate_lines = {
+        "    name: Candidate Quality",
+        f"    needs: [{dependencies}]",
+        "    if: ${{ always() }}",
+        "        if: ${{ always() }}",
+        f"        run: {success_tests}",
+        *(f"          {variable}: ${{{{ needs.{job}.result }}}}" for job, variable in gate_results.items()),
+    }
+    masks_failure = re.compile(r"(?m)^ +(?:- )?continue-on-error:(?! false$)")
+    if not gate_lines.issubset(candidate.splitlines()) or masks_failure.search(candidate):
+        yield "Candidate Quality must always run and require success from Repo Hygiene, Go Checks, and Web Checks."
+
+    required_commands = {
+        "repo-hygiene": ('python3 scripts/check-repo.py --base "$PR_BASE" --head "$PR_HEAD"',),
+        "go-checks": ("go test -mod=readonly -count=1 -race ./...", "go vet -mod=readonly ./..."),
+        "web-checks": ("npm ci --no-audit --no-fund", "npm run build"),
+    }
+    for job, commands in required_commands.items():
+        body = jobs_by_id.get(job, "")
+        if (
+            not {f"        run: {command}" for command in commands}.issubset(body.splitlines())
+            or re.search(r"(?m)^ +(?:- )?if:", body)
+            or masks_failure.search(body)
+        ):
+            yield f"PR Checks job {job} must run its required commands and report failures."
+
+
 def governance_problems():
     ruleset = json.loads(read_text(ROOT / ".github/rulesets/master-protection.json"))
     rules = {rule["type"]: rule.get("parameters", {}) for rule in ruleset["rules"]}
@@ -103,20 +145,11 @@ def governance_problems():
     ):
         yield "Ruleset differs from the documented master branch contract."
 
-    workflow = read_text(ROOT / ".github/workflows/pr-check.yml")
-    header = workflow.split("\njobs:\n", 1)[0]
-    if not re.search(r"(?m)^  pull_request:\n    branches:\n      - dev\n      - master$", header):
-        yield "PR Checks must target dev and master."
-    if re.search(r"(?m)^  (push|pull_request_target):", header):
-        yield "PR Checks must run only in its declared pull request context."
-    if not re.search(r"(?m)^permissions:\n  contents: read$", header):
-        yield "PR Checks must declare read-only content permissions."
-    candidate = workflow.partition("\n  candidate-quality:\n")[2]
-    if not all(part in candidate for part in (
-        "name: Candidate Quality", "needs: repo-hygiene", "always()",
-        "needs.repo-hygiene.result", 'test "$HYGIENE" = success',
-    )):
-        yield "Candidate Quality must wait for and require Repo Hygiene."
+    yield from workflow_problems(read_text(ROOT / ".github/workflows/pr-check.yml"))
+
+    web_package = json.loads(read_text(ROOT / "web/package.json"))
+    if web_package.get("scripts", {}).get("build") != "tsc --noEmit && vite build":
+        yield "The Web build must type-check with TypeScript before running the Vite production build."
 
     if read_text(ROOT / "AGENTS.md") != read_text(ROOT / "CLAUDE.md"):
         yield "AGENTS.md and CLAUDE.md must have identical contents."

@@ -14,15 +14,23 @@
 
 ## CI 契约
 
-`PR Checks` 在目标为 `dev` 或 `master` 的 PR 上运行。规划阶段有 `Repo Hygiene` 与聚合 `Candidate Quality` 两个 job。治理检查覆盖所有活跃文档与日常文件，PR 环境额外检查实际提交范围和空白差异。聚合等待组件结束，组件失败、取消或跳过时视为未通过。工作流只读仓库权限，不需要环境密钥。
+`PR Checks` 在目标为 `dev` 或 `master` 的 PR 上运行，使用只读仓库权限且无需环境密钥。
 
-Go、React、真实联调及发布检查按 [BASE-03](../topics/foundation.md#base-03) 与产品阶段逐步建立。当前探索源码可运行开发机检查，正式发布条件见 [OPS-03](../topics/deployment.md#ops-03)。文档与 CI 修改完成后，可依次运行：
+| 作业 | 必需检查 |
+| --- | --- |
+| `Repo Hygiene` | 运行 `scripts/check-repo.py`，检查活跃文档、治理契约、PR 提交范围和空白差异。 |
+| `Go Checks` | 按 `go.mod` 选用 Go，运行 `go test -mod=readonly -count=1 -race ./...` 和 `go vet -mod=readonly ./...`。 |
+| `Web Checks` | 使用 Node.js 24，在 `web/` 从锁文件执行 `npm ci --no-audit --no-fund`，再用 `npm run build` 依次执行 TypeScript 类型检查与 Vite 生产构建。 |
+
+`Candidate Quality` 等待三个作业结束，仅当它们都返回 `success` 时通过。作业返回 `failure`、`cancelled` 或 `skipped`，汇总步骤即以非零状态退出。[GitHub Actions 依赖结果](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#needs-context)
+
+候选镜像、浏览器与部署验证按 [P1 验收矩阵](../planning/first-web-slice.md#p1-acceptance)记录，正式发布条件见 [OPS-03](../topics/deployment.md#ops-03)。文档与 CI 修改可运行以下仓库检查。
 
 ```sh
 python3 scripts/check-repo.py
 ```
 
-已有 Git 历史时，可指定比较基线：
+已有 Git 历史时，可指定比较基线。
 
 ```sh
 python3 scripts/check-repo.py --base <base-sha> --head <head-sha>

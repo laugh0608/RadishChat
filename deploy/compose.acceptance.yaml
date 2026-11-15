@@ -1,0 +1,47 @@
+x-chat: &chat
+  image: ${RADISHCHAT_IMAGE:?set RADISHCHAT_IMAGE to the local candidate tag}
+  pull_policy: never
+
+x-chat-environment: &chat-environment
+  RADISHCHAT_REGISTRATION: invite
+  RADISHCHAT_INVITE_CODE: ${RADISHCHAT_ACCEPTANCE_INVITE:?set a synthetic invite code}
+  RADISHCHAT_TRUSTED_PROXY_IP: ${RADISHCHAT_ACCEPTANCE_PROXY_IP:-172.30.245.10}
+
+services:
+  chat-a:
+    <<: *chat
+    environment:
+      <<: *chat-environment
+      RADISHCHAT_PUBLIC_URL: https://chat-a.radishchat.test:${RADISHCHAT_ACCEPTANCE_PORT:-8443}
+    volumes:
+      - chat-a-data:/data
+  chat-b:
+    <<: *chat
+    environment:
+      <<: *chat-environment
+      RADISHCHAT_PUBLIC_URL: https://chat-b.radishchat.test:${RADISHCHAT_ACCEPTANCE_PORT:-8443}
+    volumes:
+      - chat-b-data:/data
+  caddy:
+    image: caddy:2.11.4-alpine
+    ports:
+      - "127.0.0.1:${RADISHCHAT_ACCEPTANCE_PORT:-8443}:443"
+    volumes:
+      - ./Caddyfile.acceptance:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      default:
+        ipv4_address: ${RADISHCHAT_ACCEPTANCE_PROXY_IP:-172.30.245.10}
+
+volumes:
+  chat-a-data:
+  chat-b-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  default:
+    ipam:
+      config:
+        - subnet: ${RADISHCHAT_ACCEPTANCE_SUBNET:-172.30.245.0/24}

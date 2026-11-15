@@ -77,7 +77,7 @@ func (s *Server) oidcStart(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "此服务器未配置 Radish 登录")
 		return
 	}
-	if !s.limit(w, "oidc:"+remoteHost(r), 50) {
+	if !s.limit(w, "oidc:"+s.clientHost(r), 50) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 10*time.Second)
@@ -119,7 +119,7 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		fail(w, 404, "此服务器未配置 Radish 登录")
 		return
 	}
-	if !s.limit(w, "oidc-callback:"+remoteHost(r), 80) {
+	if !s.limit(w, "oidc-callback:"+s.clientHost(r), 80) {
 		return
 	}
 	ctx, cancel := context.WithTimeout(r.Context(), 20*time.Second)
@@ -175,7 +175,7 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		var userID int64
 		err := tx.QueryRowContext(ctx, "SELECT user_id FROM external_accounts WHERE issuer=? AND subject=?", id.Issuer, id.Subject).Scan(&userID)
 		if errors.Is(err, sql.ErrNoRows) {
-			if s.cfg.DisableRegistration {
+			if s.cfg.Registration != RegistrationOpen {
 				return errRegistrationClosed
 			}
 			// 保留前缀，避免把同名的本地账号自动合并。

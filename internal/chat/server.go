@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/netip"
 	"net/url"
 	"path/filepath"
 	"strconv"
@@ -20,20 +21,23 @@ import (
 type Config struct {
 	PublicURL, Database, WebDir                          string
 	OIDCIssuer, OIDCClientID, OIDCSecret, OIDCClientAuth string
-	DisableRegistration                                  bool
+	Registration                                         RegistrationMode
+	InviteCode, TrustedProxyIP                           string
 }
 
 type Server struct {
-	db        *sql.DB
-	mux       *http.ServeMux
-	cfg       Config
-	oidc      *oidcLogin
-	secure    bool
-	events    subscribers
-	gate      chan struct{}
-	rateMu    sync.Mutex
-	attempts  map[string]rateEntry
-	nextSweep time.Time
+	db         *sql.DB
+	mux        *http.ServeMux
+	cfg        Config
+	oidc       *oidcLogin
+	secure     bool
+	proxyIP    netip.Addr
+	inviteHash []byte
+	events     subscribers
+	gate       chan struct{}
+	rateMu     sync.Mutex
+	attempts   map[string]rateEntry
+	nextSweep  time.Time
 }
 
 func originURL(s string) (*url.URL, bool) {
@@ -56,6 +60,29 @@ func New(cfg Config) (*Server, error) {
 	if !ok || cfg.PublicURL != u.Scheme+"://"+u.Host {
 		return nil, errors.New("RADISHCHAT_PUBLIC_URL 必须为 HTTPS 源地址，本机回环地址可用 HTTP")
 	}
+	var inviteHash []byte
+	switch cfg.Registration {
+	case "":
+		cfg.Registration = RegistrationOff
+	case RegistrationOff, RegistrationOpen:
+	case RegistrationInvite:
+		if !inviteCodePattern.MatchString(cfg.InviteCode) {
+			return nil, errors.New("邀请码模式需要 48 位小写十六进制 RADISHCHAT_INVITE_CODE")
+		}
+		inviteHash = digest(cfg.InviteCode)
+	default:
+		return nil, errors.New("RADISHCHAT_REGISTRATION 仅接受 off、on 或 invite")
+	}
+	cfg.InviteCode = ""
+	var proxyIP netip.Addr
+	if cfg.TrustedProxyIP != "" {
+		var err error
+		proxyIP, err = netip.ParseAddr(cfg.TrustedProxyIP)
+		if err != nil || proxyIP.Zone() != "" {
+			return nil, errors.New("RADISHCHAT_TRUSTED_PROXY_IP 必须为单个 IPv4 或 IPv6 地址")
+		}
+		proxyIP = proxyIP.Unmap()
+	}
 	o, err := newOIDC(cfg, u.Scheme == "https")
 	if err != nil {
 		return nil, err
@@ -64,8 +91,8 @@ func New(cfg Config) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{db: db, mux: http.NewServeMux(), cfg: cfg, oidc: o, secure: u.Scheme == "https",
-		gate: make(chan struct{}, 4), attempts: make(map[string]rateEntry)}
+	s := &Server{db: db, mux: http.NewServeMux(), cfg: cfg, oidc: o, secure: u.Scheme == "https", proxyIP: proxyIP,
+		inviteHash: inviteHash, gate: make(chan struct{}, 4), attempts: make(map[string]rateEntry)}
 	s.routes()
 	return s, nil
 }
@@ -81,7 +108,11 @@ func (s *Server) routes() {
 		reply(w, 200, map[string]string{"status": "ok"})
 	})
 	s.mux.HandleFunc("GET /api/v1/info", func(w http.ResponseWriter, _ *http.Request) {
-		reply(w, 200, map[string]any{"name": "RadishChat", "apiVersion": 1, "registration": !s.cfg.DisableRegistration, "radishLogin": s.oidc != nil, "endToEndEncryption": false})
+		reply(w, 200, map[string]any{
+			"name": "RadishChat", "apiVersion": 1, "registration": s.cfg.Registration != RegistrationOff,
+			"registrationInviteRequired": s.cfg.Registration == RegistrationInvite,
+			"radishLogin":                s.oidc != nil, "endToEndEncryption": false,
+		})
 	})
 	s.mux.HandleFunc("POST /api/v1/register", s.register)
 	s.mux.HandleFunc("POST /api/v1/login", s.login)
