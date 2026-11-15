@@ -10,10 +10,12 @@ Web 本地准入与聊天主路径、发送恢复与撤权已通过单项验收�
 
 完整多阶段候选镜像和本机 HTTPS 双实例已通过单项验收。Linux ARM64 候选标签为 `radishchat:p1-ops-01-03-20261115`。[部署说明](../../deploy/README.md) · [候选镜像与 HTTPS 验收](../records/2026-11-15-candidate-https.md)
 
+独立实例切换、备份恢复和固定 v1 样本的迁移失败回退已通过本机验收。本轮 Linux ARM64 候选标签为 `radishchat:p1-web-switch-restore-20261115`。[维护步骤](../../deploy/README.md#sqlite-backup-restore) · [验收记录](../records/2026-11-15-instance-switch-and-restore.md)
+
 | 顺序 | 当前事项 | 出口 |
 | --- | --- | --- |
-| 1 | 按[首批开工顺序](../planning/first-web-slice.md#p1-start-order)用候选产物验证[独立实例切换](../topics/clients.md#web-01-03)和[备份恢复](../topics/deployment.md#ops-01-04)。[CI 产品检查](../topics/foundation.md#base-03-02)可独立安排 | 核对主机间账号、会话、草稿隔离，以及恢复后旧会话失效 |
-| 2 | 按[首轮验收矩阵](../planning/first-web-slice.md#p1-acceptance)完成 P1 联合验收 | 在目标 HTTPS 入口验证候选版本，并复验固定合成样本迁移与迁移失败后的备份恢复 |
+| 1 | [CI 产品检查](../topics/foundation.md#base-03-02) | 将 Go 和 Web 检查接入 `Candidate Quality`，验证汇总门禁 |
+| 2 | 按[首轮验收矩阵](../planning/first-web-slice.md#p1-acceptance)完成 P1 联合验收 | 用带检查结果的候选镜像验证目标 HTTPS 入口，复核聊天、固定样本迁移及备份恢复证据 |
 
 真实 Radish 登录的独立验收延期。等 Radish 侧有稳定实例且具备测试发行方、独立客户端、受控测试身份与 HTTPS 回调后，再按 [AUTH-02](../topics/identity.md#auth-02)安排。P1 使用本地账号放行。
 

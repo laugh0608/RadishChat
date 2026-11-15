@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
@@ -14,6 +15,8 @@ import (
 
 	"radishchat/internal/chat"
 )
+
+const defaultDatabase = "data/chat.sqlite"
 
 func env(key, fallback string) string {
 	if value := os.Getenv(key); value != "" {
@@ -36,7 +39,7 @@ func run() error {
 	}
 	s, err := chat.New(chat.Config{
 		PublicURL:      env("RADISHCHAT_PUBLIC_URL", "http://127.0.0.1:8080"),
-		Database:       env("RADISHCHAT_DATABASE", "data/chat.sqlite"),
+		Database:       env("RADISHCHAT_DATABASE", defaultDatabase),
 		WebDir:         env("RADISHCHAT_WEB_DIR", "web/dist"),
 		OIDCIssuer:     os.Getenv("RADISHCHAT_OIDC_ISSUER"),
 		OIDCClientID:   os.Getenv("RADISHCHAT_OIDC_CLIENT_ID"),
@@ -76,9 +79,28 @@ func run() error {
 	}
 }
 
+func execute(args []string) error {
+	if len(args) == 0 {
+		return run()
+	}
+	if len(args) != 2 || (args[0] != "backup" && args[0] != "restore") || args[1] == "" {
+		return errors.New("用法: radishchat [backup <备份文件> | restore <备份文件>]")
+	}
+	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	source, target := env("RADISHCHAT_DATABASE", defaultDatabase), args[1]
+	if args[0] == "restore" {
+		source, target = target, source
+	}
+	if err := chat.CopyDatabase(ctx, source, target); err != nil {
+		return fmt.Errorf("%s: %w", args[0], err)
+	}
+	return nil
+}
+
 func main() {
-	if err := run(); err != nil {
-		slog.Error("RadishChat 启动失败", "error", err)
+	if err := execute(os.Args[1:]); err != nil {
+		slog.Error("RadishChat 执行失败", "error", err)
 		os.Exit(1)
 	}
 }

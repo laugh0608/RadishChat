@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api, errorText, openServer, RequestError, type Account, type Info, type Message, type Page, type Room } from './api';
+import { clearDrafts, draftKey, readDraft, retainDrafts, saveDraft, type Draft } from './drafts';
 import './style.css';
 
 const authErrors: Record<string, string> = {
@@ -186,13 +187,14 @@ function Conversation({me, room, version, onChange, onBack, onAccessLost}: {
   const [earlier, setEarlier] = useState(false);
   const [members, setMembers] = useState(false);
   const [preview, setPreview] = useState(false);
-  const [text, setText] = useState('');
+  const storageKey = draftKey(me.id, room);
+  const [draft, setDraft] = useState(() => readDraft(storageKey));
+  const {text} = draft;
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState('');
   const [sendError, setSendError] = useState('');
   const tooLong = Array.from(text).length > maxMarkdownCodePoints;
   const composerError = tooLong ? '消息最多 8,000 个字符' : sendError;
-  const request = useRef<{body: string; id: string} | null>(null);
   const feed = useRef<HTMLDivElement>(null);
   // null 表示尚未读取，0 表示已经确认没有可见消息。
   const newest = useRef<number | null>(null);
@@ -200,6 +202,11 @@ function Conversation({me, room, version, onChange, onBack, onAccessLost}: {
   const paging = useRef<{controller: AbortController; refresh: () => Promise<void>} | null>(null);
   const pinBottom = useRef(true);
   const preserve = useRef(0);
+
+  function updateDraft(next: Draft) {
+    setDraft(next);
+    saveDraft(storageKey, next);
+  }
 
   function merge(next: Message[]) {
     if (next.length === 0) return;
@@ -300,20 +307,21 @@ function Conversation({me, room, version, onChange, onBack, onAccessLost}: {
     e.preventDefault();
     const signal = paging.current?.controller.signal;
     if (sending || tooLong || !text.trim() || !signal || signal.aborted) return;
-    if (request.current?.body !== text) request.current = {body: text, id: crypto.randomUUID()};
+    const requestId = draft.requestId ?? crypto.randomUUID();
+    updateDraft({text, requestId});
     setSending(true); setSendError('');
     try {
-      const sent = await api<Message>(`/rooms/${room.id}/messages`, 'POST', {markdown: text, requestId: request.current.id}, signal, room.membershipId);
+      const sent = await api<Message>(`/rooms/${room.id}/messages`, 'POST', {markdown: text, requestId}, signal, room.membershipId);
       if (signal.aborted) return;
       pinBottom.current = true;
       // 先让已有增量补拉使用原游标，以免跳过比本次发送更早的对端消息。
       merge([sent]);
-      request.current = null; setText('');setPreview(false);onChange();
+      updateDraft({text: ''}); setPreview(false); onChange();
     } catch (err) {
       if (signal.aborted) return;
       if (err instanceof RequestError && err.status === 404) loseAccess();
       else {
-        if (err instanceof RequestError && err.status === 409) request.current = null;
+        if (err instanceof RequestError && err.status === 409) updateDraft({text});
         setSendError(errorText(err));
       }
     } finally { if (!signal.aborted) setSending(false); }
@@ -343,7 +351,7 @@ function Conversation({me, room, version, onChange, onBack, onAccessLost}: {
       <div className="compose-label"><label htmlFor="message">消息 <small>支持 Markdown</small></label>
         <button type="button" className="text-button" aria-pressed={preview} onClick={() => setPreview(!preview)}>{preview ? '返回编辑' : '预览'}</button></div>
       {preview && <div className="markdown preview" aria-label="消息预览">{text.trim() ? <MessageBody body={text}/> : '还没有内容'}</div>}
-      <textarea hidden={preview} id="message" placeholder="写点什么…" value={text} disabled={sending} onChange={(e) => {setText(e.target.value);setSendError('');}}
+      <textarea hidden={preview} id="message" placeholder="写点什么…" value={text} disabled={sending} onChange={(e) => {updateDraft({text: e.target.value});setSendError('');}}
         onKeyDown={e => {if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.nativeEvent.isComposing) {e.preventDefault();e.currentTarget.form?.requestSubmit();}}}/>
       <div className="compose-actions">{composerError && <span className="error" role="alert">{composerError}</span>}
         <button className="primary" disabled={sending || tooLong || !text.trim()}>{sending ? '发送中…' : sendError ? '重试发送' : '发送'}</button></div>
@@ -400,6 +408,7 @@ function Workspace({me, onLogout}: {me: Account; onLogout: () => void}) {
     api<Room[]>('/rooms', 'GET', undefined, controller.signal)
       .then(result => {
         if (controller.signal.aborted) return;
+        retainDrafts(me.id, result);
         setRoomsView(view => {
           const next = result.find(room => room.id === view.selected?.id);
           if (next) return {rooms: result, selected: {id: next.id, membershipId: next.membershipId}};
@@ -416,12 +425,13 @@ function Workspace({me, onLogout}: {me: Account; onLogout: () => void}) {
         else setError(errorText(err));
       });
     return () => controller.abort();
-  }, [version]);
+  }, [me.id, version]);
   function selectRoom(selection?: RoomSelection) {
     setRoomsView(view => ({rooms: view.rooms, selected: selection}));
   }
   function loseRoom(room: Room) {
     roomsRequest.current?.abort();
+    saveDraft(draftKey(me.id, room), {text: ''});
     setRoomsView(view => {
       const rooms = view.rooms.filter(candidate => candidate.id !== room.id || candidate.membershipId !== room.membershipId);
       if (view.selected?.id === room.id && view.selected.membershipId === room.membershipId) {
@@ -463,7 +473,10 @@ function App() {
     Promise.all([
       api<Info>('/info', 'GET', undefined, controller.signal),
       api<Account>('/me', 'GET', undefined, controller.signal).catch(err => {
-        if (err instanceof RequestError && err.status === 401) return null;
+        if (err instanceof RequestError && err.status === 401) {
+          if (!controller.signal.aborted) clearDrafts();
+          return null;
+        }
         throw err;
       }),
     ]).then(([current, user]) => { if (!controller.signal.aborted) {setAccount(user);setInfo(current);} })
@@ -471,6 +484,7 @@ function App() {
     return () => controller.abort();
   }, [accessVersion]);
   function returnToAccess() {
+    clearDrafts();
     setAccount(null);
     setInfo(undefined);
     setError('');
@@ -479,5 +493,9 @@ function App() {
   if (!info) return <main className="initial"><Brand /><p role={error ? 'alert' : 'status'}>{error || '正在连接服务器…'}</p>{error && <button className="secondary" onClick={() => window.location.reload()}>重试</button>}</main>;
   return account ? <Workspace key={account.id} me={account} onLogout={returnToAccess} /> : <Access info={info} onLogin={setAccount} onInfo={setInfo} />;
 }
+
+window.addEventListener('pageshow', event => {
+  if (event.persisted) window.location.reload();
+});
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

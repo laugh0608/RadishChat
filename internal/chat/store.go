@@ -12,6 +12,8 @@ import (
 	_ "modernc.org/sqlite"
 )
 
+const currentSchemaVersion = 3
+
 const schemaV1 = `
 CREATE TABLE users (
   id INTEGER PRIMARY KEY,
@@ -98,17 +100,10 @@ func openDB(path string) (*sql.DB, error) {
 	if err := file.Close(); err != nil {
 		return nil, err
 	}
-	u := url.URL{Scheme: "file", Path: path}
-	q := u.Query()
-	q.Add("_pragma", "foreign_keys(1)")
-	q.Add("_pragma", "busy_timeout(5000)")
-	u.RawQuery = q.Encode()
-	db, err := sql.Open("sqlite", u.String())
+	db, err := sqliteDatabase(path, "rw")
 	if err != nil {
 		return nil, err
 	}
-	// 单实例使用一条写连接；事务不得另行从 DB 取第二条连接。
-	db.SetMaxOpenConns(1)
 	ctx := context.Background()
 	err = transaction(ctx, db, func(tx *sql.Tx) error {
 		var version int
@@ -131,7 +126,7 @@ func openDB(path string) (*sql.DB, error) {
 				return fmt.Errorf("SQLite 从 v2 迁移到 v3 失败: %w", err)
 			}
 			return nil
-		case 3:
+		case currentSchemaVersion:
 			return nil
 		default:
 			return fmt.Errorf("未支持的数据库版本 %d", version)
@@ -141,6 +136,19 @@ func openDB(path string) (*sql.DB, error) {
 		db.Close()
 		return nil, err
 	}
+	return db, nil
+}
+
+func sqliteDatabase(path, mode string) (*sql.DB, error) {
+	u := url.URL{Scheme: "file", Path: path}
+	q := url.Values{"mode": {mode}, "_pragma": {"foreign_keys(1)", "busy_timeout(5000)"}}
+	u.RawQuery = q.Encode()
+	db, err := sql.Open("sqlite", u.String())
+	if err != nil {
+		return nil, err
+	}
+	// 单实例使用一条连接；事务不得另行从 DB 取第二条连接。
+	db.SetMaxOpenConns(1)
 	return db, nil
 }
 
