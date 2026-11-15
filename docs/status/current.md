@@ -14,7 +14,7 @@ Web 本地准入与聊天主路径、发送恢复与撤权已通过单项验收�
 
 | 顺序 | 当前事项 | 出口 |
 | --- | --- | --- |
-| 1 | [CI 产品检查](../topics/foundation.md#base-03-02) | 将 Go 和 Web 检查接入 `Candidate Quality`，验证汇总门禁 |
+| 1 | [CI 产品检查](../topics/foundation.md#base-03-02) | Go 和 Web 已接入 `Candidate Quality` 并通过本地验证。待复核及 GitHub Actions 实跑。[本地验证记录](../records/2026-11-15-ci-product-checks.md) |
 | 2 | 按[首轮验收矩阵](../planning/first-web-slice.md#p1-acceptance)完成 P1 联合验收 | 用带检查结果的候选镜像验证目标 HTTPS 入口，复核聊天、固定样本迁移及备份恢复证据 |
 
 真实 Radish 登录的独立验收延期。等 Radish 侧有稳定实例且具备测试发行方、独立客户端、受控测试身份与 HTTPS 回调后，再按 [AUTH-02](../topics/identity.md#auth-02)安排。P1 使用本地账号放行。

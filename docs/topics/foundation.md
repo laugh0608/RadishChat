@@ -28,7 +28,7 @@
 
 ## BASE-03 技术基线与持续集成
 
-- 阶段与状态：P1。本地产品检查基线已验收，CI 产品检查待开始。
+- 阶段与状态：P1。本地产品检查基线已验收，CI 产品检查已接入并通过本地验证，待复核及 GitHub Actions 实跑。
 - 范围与预览采用：沿用 Go 集成测试、Web 类型检查与生产构建。将与首批合同匹配的 Go 和 Web 检查纳入 `Candidate Quality`，补齐关键边界回归，并保留完整候选镜像构建证据。
 - 验收：从干净检出按锁定依赖完成 Go 检查、Web 生产构建及候选镜像构建。稳定主线接收正式代码前，产品检查在 CI 可复现并由 `Candidate Quality` 汇总。浏览器与部署恢复按候选版本分别保留证据。[P1 验收矩阵](../planning/first-web-slice.md#p1-acceptance)
 
@@ -37,4 +37,4 @@
 | 任务 | 前置任务 | 改动范围 | 单项验收 | 状态 |
 | --- | --- | --- | --- | --- |
 | <a id="base-03-01"></a> BASE-03-01 本地产品检查基线 | BASE-02 已确认 | 核对 `go.mod`、`go.sum`、`web/package-lock.json` 与现有测试和构建入口，记录 Go、Node 及 npm 版本和本机命令 | 在干净工作目录按锁定依赖运行仓库治理、Go 测试及 `go vet`、Web 类型检查及生产构建。记录工具版本、结果和预览基线已有缺口 | 已完成。[验收记录](../records/2026-11-14-p1-local-baseline.md) |
-| <a id="base-03-02"></a> BASE-03-02 汇总 CI 产品检查 | BASE-03-01 | 更新 `.github/workflows/pr-check.yml`，将 Go 和 Web 检查接入 `Candidate Quality`，保留现有仓库治理检查和 PR 入口 | 验证各必需检查成功时汇总通过，失败、取消或跳过时汇总失败。GitHub CI 启用后记录实际候选运行结果 | 待开始 |
+| <a id="base-03-02"></a> BASE-03-02 汇总 CI 产品检查 | BASE-03-01 | 将 Go 竞态测试、`go vet`、Web 类型检查与生产构建接入 `Candidate Quality`，保留现有仓库治理检查和 PR 入口 | 验证各必需检查成功时汇总通过，失败、取消或跳过时汇总失败。记录 GitHub Actions 实际候选运行结果 | 待验收。本地验证已通过，待复核及 GitHub Actions 实跑。[本地验证记录](../records/2026-11-15-ci-product-checks.md) |
