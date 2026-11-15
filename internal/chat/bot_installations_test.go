@@ -120,6 +120,12 @@ func TestGroupBotInstallationAuthorizationAndLifecycle(t *testing.T) {
 	if len(groupList) != 0 {
 		t.Fatal("pending installation was visible to an ordinary member")
 	}
+	step(member, http.MethodGet, listPath+"?includePending=1", nil, http.StatusForbidden)
+	var pendingList []botInstallationPreview
+	call(t, groupOwner, origin, http.MethodGet, listPath+"?includePending=1", nil, http.StatusOK, &pendingList)
+	if len(pendingList) != 1 || pendingList[0].InstallationID != pending.InstallationID || pendingList[0].State != "pending" {
+		t.Fatal("group owner could not recover the pending installation from the group list")
+	}
 	var ownerList []ownedBotInstallation
 	call(t, developer, origin, http.MethodGet, ownedPath, nil, http.StatusOK, &ownerList)
 	if len(ownerList) != 1 || ownerList[0].InstallationID != pending.InstallationID || ownerList[0].State != "pending" ||
@@ -132,6 +138,10 @@ func TestGroupBotInstallationAuthorizationAndLifecycle(t *testing.T) {
 	testBotRoomAccess(t, origin, token, group, "", http.StatusNotFound)
 	step(developer, http.MethodPost, approvePath(pending.InstallationID), nil, http.StatusNoContent)
 	step(developer, http.MethodPost, approvePath(pending.InstallationID), nil, http.StatusNoContent)
+	call(t, groupOwner, origin, http.MethodGet, listPath+"?includePending=1", nil, http.StatusOK, &pendingList)
+	if len(pendingList) != 1 || pendingList[0].State != "active" {
+		t.Fatal("group owner's list did not reflect approval")
+	}
 
 	call(t, member, origin, http.MethodGet, listPath, nil, http.StatusOK, &groupList)
 	if len(groupList) != 1 || groupList[0].InstallationID != pending.InstallationID || groupList[0].BotID != record.ID ||

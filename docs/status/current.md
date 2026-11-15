@@ -2,7 +2,7 @@
 
 更新日期 2026-11-15。
 
-**P2 群聊扩展与内测完善正在实施。** `BOT-01-01` 的独立身份与凭据、`BOT-01-02` 的群安装 API 与撤权均已通过本机验收，SQLite 当前版本为 v5。下一项是 `BOT-01-03` Web 管理与恢复联合复验。[身份与凭据验收](../records/2026-11-15-bot-identity-credentials.md) · [群安装与撤权验收](../records/2026-11-15-bot-group-installations.md) · [Web 管理与恢复](../topics/bots.md#bot-01-03)
+**P2 群聊扩展与内测完善正在实施。** `BOT-01` 的独立身份、凭据、群安装和 Web 管理已通过本机验收，SQLite 当前版本为 v5。下一项是 `BOT-02`，先确定事件交付方式、重试和撤销规则，再接命令和示例 Bot。[Web 双实例验收](../records/2026-11-15-bot-web-management.md) · [BOT-02](../topics/bots.md#bot-02)
 
 **P1 Web 聊天与自部署内测的候选版本已通过本机联合验收。** 本地检查基线、合成预览 v1 样本、默认准入与本地会话、公网邀请码、私聊唯一性和成员操作、外部登录禁用复验已通过单项验收。[基线和迁移样本](../records/2026-11-14-p1-local-baseline.md) · [本地会话验收](../records/2026-11-15-auth-local-sessions.md) · [邀请码验收](../records/2026-11-15-auth-invite.md) · [会话与成员验收](../records/2026-11-15-msg-room-membership.md) · [外部登录禁用验收](../records/2026-11-15-auth-oidc-disabled.md)
 

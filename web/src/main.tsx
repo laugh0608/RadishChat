@@ -3,6 +3,7 @@ import { createRoot } from 'react-dom/client';
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api, errorText, openServer, RequestError, type Account, type Info, type Message, type Page, type Room } from './api';
+import { BotManager, GroupBots } from './bots';
 import { clearDrafts, draftKey, readDraft, retainDrafts, saveDraft, type Draft } from './drafts';
 import './style.css';
 
@@ -185,7 +186,7 @@ function Conversation({me, room, version, onChange, onBack, onAccessLost}: {
   const [more, setMore] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const [earlier, setEarlier] = useState(false);
-  const [members, setMembers] = useState(false);
+  const [panel, setPanel] = useState<'members' | 'bots'>();
   const [preview, setPreview] = useState(false);
   const storageKey = draftKey(me.id, room);
   const [draft, setDraft] = useState(() => readDraft(storageKey));
@@ -331,10 +332,16 @@ function Conversation({me, room, version, onChange, onBack, onAccessLost}: {
       <button type="button" className="secondary mobile-back" onClick={onBack}>返回</button>
       <div className="avatar" aria-hidden="true">{first(room.name)}</div>
       <div className="grow"><h1>{room.name}</h1><p>{room.kind === 'direct' ? `私聊 · @${room.peerUsername}` : `群组 · ${room.memberCount} 位成员`}</p></div>
-      {room.kind === 'group' && <button type="button" className="secondary" aria-expanded={members} onClick={() => setMembers(!members)}>成员</button>}
+      {room.kind === 'group' && <div className="row conversation-tools">
+        <button type="button" className="secondary" aria-expanded={panel === 'members'}
+          onClick={() => setPanel(current => current === 'members' ? undefined : 'members')}>成员</button>
+        <button type="button" className="secondary" aria-label="群 Bot" aria-expanded={panel === 'bots'}
+          onClick={() => setPanel(current => current === 'bots' ? undefined : 'bots')}>Bot</button>
+      </div>}
     </header>
     <p className="conversation-privacy">普通会话 · 消息正文由服务器处理并保存，拥有数据库或备份访问权限的人可以读取。</p>
-    {members && <Members room={room} me={me} version={version} getRoomSignal={() => paging.current?.controller.signal} onChange={onChange} onAccessLost={loseAccess} />}
+    {panel === 'members' && <Members room={room} me={me} version={version} getRoomSignal={() => paging.current?.controller.signal} onChange={onChange} onAccessLost={loseAccess} />}
+    {panel === 'bots' && <GroupBots key={room.ownerId} room={room} canManage={room.ownerId === me.id} version={version} onChange={onChange} onAccessLost={loseAccess} />}
     <div className="message-feed" ref={feed} aria-label="聊天记录" onScroll={(e) => {
       const el = e.currentTarget;
       pinBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
@@ -366,6 +373,7 @@ function Workspace({me, onLogout}: {me: Account; onLogout: () => void}) {
     rooms: Room[]; selected?: RoomSelection; roomNotice?: string;
   }>({rooms: []});
   const [create, setCreate] = useState<Room['kind']>();
+  const [manageBots, setManageBots] = useState(false);
   const [version, setVersion] = useState(0);
   const [network, setNetwork] = useState('正在连接');
   const [error, setError] = useState('');
@@ -427,6 +435,7 @@ function Workspace({me, onLogout}: {me: Account; onLogout: () => void}) {
     return () => controller.abort();
   }, [me.id, version]);
   function selectRoom(selection?: RoomSelection) {
+    setManageBots(false);
     setRoomsView(view => ({rooms: view.rooms, selected: selection}));
   }
   function loseRoom(room: Room) {
@@ -442,7 +451,7 @@ function Workspace({me, onLogout}: {me: Account; onLogout: () => void}) {
     notify();
   }
   const current = rooms.find(r => r.id === selected?.id);
-  return <main className={`workspace${current ? ' has-room' : ''}`}>
+  return <main className={`workspace${current || manageBots ? ' has-room' : ''}`}>
     <aside className="rail">
       <div className="rail-top"><Brand /><div className="status-line"><span className={`dot ${network === '已连接' ? 'online' : ''}`}/>{network}<span className="host">{window.location.host}</span></div></div>
       <div className="rail-controls"><h1>会话</h1><div className="row"><button className="secondary" type="button" onClick={() => setCreate('direct')}>新私聊</button><button className="secondary" type="button" onClick={() => setCreate('group')}>建群组</button></div></div>
@@ -451,14 +460,18 @@ function Workspace({me, onLogout}: {me: Account; onLogout: () => void}) {
       {roomNotice && <p role="status" className="subtle rail-error">{roomNotice}</p>}
       <nav aria-label="会话列表" className="room-list">
         {rooms.length === 0 && <p className="subtle">还没有会话。从一个熟悉的用户名开始。</p>}
-        {rooms.map(r => <button type="button" key={r.id} className={r.id === selected?.id ? 'room active' : 'room'} aria-current={r.id === selected?.id ? 'true' : undefined} onClick={() => {selectRoom({id: r.id, membershipId: r.membershipId});setCreate(undefined);}}>
+        {rooms.map(r => <button type="button" key={r.id} className={!manageBots && r.id === selected?.id ? 'room active' : 'room'} aria-current={!manageBots && r.id === selected?.id ? 'true' : undefined} onClick={() => {selectRoom({id: r.id, membershipId: r.membershipId});setCreate(undefined);}}>
           <span className="avatar" aria-hidden="true">{first(r.name)}</span><span className="room-text"><strong>{r.name}</strong><small>{r.kind === 'group' ? `群组 · ${r.memberCount} 人` : `@${r.peerUsername}`}</small></span>
         </button>)}
       </nav>
       <footer className="rail-foot"><div className="account-line"><div className="avatar" aria-hidden="true">{first(me.displayName)}</div><div className="grow"><strong>{me.displayName}</strong><small>@{me.username}</small></div>
-        <button type="button" className="text-button" onClick={async () => {try {await api('/logout', 'POST');onLogout();} catch (err) {setError(errorText(err));}}}>退出</button></div><ServerPicker /></footer>
+        <button type="button" className="text-button" onClick={async () => {try {await api('/logout', 'POST');onLogout();} catch (err) {setError(errorText(err));}}}>退出</button></div>
+        <button type="button" className="text-button" aria-expanded={manageBots} onClick={() => {setCreate(undefined);setManageBots(value => !value);}}>管理 Bot</button>
+        <ServerPicker />
+      </footer>
     </aside>
-    {current ? <Conversation key={current.id + ':' + current.membershipId} room={current} me={me} version={version} onChange={notify} onBack={() => selectRoom()} onAccessLost={() => loseRoom(current)} /> :
+    {manageBots ? <BotManager version={version} onChange={notify} onClose={() => setManageBots(false)} /> : current ?
+      <Conversation key={current.id + ':' + current.membershipId} room={current} me={me} version={version} onChange={notify} onBack={() => selectRoom()} onAccessLost={() => loseRoom(current)} /> :
       <section className="welcome"><span className="eyebrow">RADISHCHAT WORKSPACE</span><h2>今天聊点什么？</h2><p>打开一个会话，或用对方在这个服务器上的用户名发起私聊。</p></section>}
   </main>;
 }

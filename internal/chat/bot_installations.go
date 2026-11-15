@@ -23,7 +23,7 @@ type groupBotInstallation struct {
 
 type botInstallationPreview struct {
 	groupBotInstallation
-	State string `json:"state"`
+	State string `json:"state,omitempty"`
 }
 
 type ownedBotInstallation struct {
@@ -50,23 +50,31 @@ func botGroupMembership(r *http.Request, tx *sql.Tx, roomID, userID int64) (memb
 func (s *Server) listGroupBotInstallations(w http.ResponseWriter, r *http.Request, u user) {
 	ctx := r.Context()
 	roomID := intID(r.PathValue("room"))
-	installations := []groupBotInstallation{}
+	includePending := r.URL.Query().Get("includePending") == "1"
+	installations := []botInstallationPreview{}
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		if _, err := botGroupMembership(r, tx, roomID, u.ID); err != nil {
+		member, err := botGroupMembership(r, tx, roomID, u.ID)
+		if err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT i.id,b.id,b.display_name,i.permission
+		if includePending && member.ownerID != u.ID {
+			return errOwner
+		}
+		rows, err := tx.QueryContext(ctx, `SELECT i.id,b.id,b.display_name,i.permission,i.state
 			FROM bot_installations i JOIN bots b ON b.id=i.bot_id
-			WHERE i.room_id=? AND i.state='active' ORDER BY b.id`, roomID)
+			WHERE i.room_id=? AND (i.state='active' OR ?) ORDER BY b.id`, roomID, includePending)
 		if err != nil {
 			return err
 		}
 		defer rows.Close()
 		for rows.Next() {
-			var item groupBotInstallation
-			var permission string
-			if err := rows.Scan(&item.InstallationID, &item.BotID, &item.DisplayName, &permission); err != nil {
+			var item botInstallationPreview
+			var permission, state string
+			if err := rows.Scan(&item.InstallationID, &item.BotID, &item.DisplayName, &permission, &state); err != nil {
 				return err
+			}
+			if includePending {
+				item.State = state
 			}
 			item.Permissions = []string{permission}
 			installations = append(installations, item)
