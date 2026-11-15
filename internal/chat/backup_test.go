@@ -17,6 +17,8 @@ func TestDatabaseBackupAndRestoreInvalidateAuthentication(t *testing.T) {
 	origin := original.host.URL
 	alice, _ := addUser(t, origin, "alice")
 	bob, _ := addUser(t, origin, "bob")
+	botRecord := createTestBot(t, bob, origin, "Fixture Bot")
+	botToken := rotateTestBot(t, bob, origin, botRecord.ID)
 	var group room
 	call(t, alice, origin, "POST", "/rooms/group", map[string]any{"name": "Fixture", "usernames": []string{"bob"}}, 201, &group)
 	path := fmt.Sprintf("/rooms/%d", group.ID)
@@ -38,6 +40,12 @@ func TestDatabaseBackupAndRestoreInvalidateAuthentication(t *testing.T) {
 	if err := original.s.Close(); err != nil {
 		t.Fatal(err)
 	}
+	restarted := newInstance(t, Config{Database: source})
+	checkBotToken(t, restarted.host.URL, botToken, http.StatusOK, nil)
+	restarted.host.Close()
+	if err := restarted.s.Close(); err != nil {
+		t.Fatal(err)
+	}
 
 	backup := filepath.Join(dir, "private", "backup.sqlite")
 	if err := CopyDatabase(t.Context(), source, backup); err != nil {
@@ -50,12 +58,15 @@ func TestDatabaseBackupAndRestoreInvalidateAuthentication(t *testing.T) {
 		}
 		checkDBInt(t, db, "PRAGMA user_version", currentSchemaVersion)
 		checkDBInt(t, db, "SELECT count(*) FROM members", 2)
+		checkDBInt(t, db, "SELECT count(*) FROM bots", 1)
 		if input == source {
 			checkDBInt(t, db, "SELECT count(*) FROM sessions", 2)
 			checkDBInt(t, db, "SELECT count(*) FROM oidc_flows", 1)
+			checkDBInt(t, db, "SELECT count(*) FROM bots WHERE token_hash IS NOT NULL", 1)
 		} else {
 			checkDBInt(t, db, "SELECT count(*) FROM sessions", 0)
 			checkDBInt(t, db, "SELECT count(*) FROM oidc_flows", 0)
+			checkDBInt(t, db, "SELECT count(*) FROM bots WHERE token_hash IS NOT NULL", 0)
 		}
 		db.Close()
 
@@ -76,7 +87,16 @@ func TestDatabaseBackupAndRestoreInvalidateAuthentication(t *testing.T) {
 			c.Jar.SetCookies(restoredURL, cookies)
 			checkDBInt(t, restored.s.db, "SELECT count(*) FROM oidc_flows", 0)
 			call(t, c, restored.host.URL, "GET", "/me", nil, http.StatusUnauthorized)
+			checkBotToken(t, restored.host.URL, botToken, http.StatusUnauthorized, nil)
 			call(t, c, restored.host.URL, "POST", "/login", credentials{Username: "bob", Password: "fixture-only-password"}, 200)
+			var bots []bot
+			call(t, c, restored.host.URL, "GET", "/bots", nil, http.StatusOK, &bots)
+			if len(bots) != 1 || bots[0] != botRecord {
+				t.Fatal("restored Bot identity or ownership changed")
+			}
+			newToken := rotateTestBot(t, c, restored.host.URL, botRecord.ID)
+			checkBotToken(t, restored.host.URL, newToken, http.StatusOK, nil)
+			checkBotToken(t, restored.host.URL, botToken, http.StatusUnauthorized, nil)
 			var members []user
 			call(t, c, restored.host.URL, "GET", path+"/members", nil, 200, &members)
 			var page messagePage
@@ -84,6 +104,37 @@ func TestDatabaseBackupAndRestoreInvalidateAuthentication(t *testing.T) {
 			if len(members) != 2 || len(page.Messages) != 1 || page.Messages[0].Markdown != body["markdown"] {
 				t.Fatal("restored group data does not match")
 			}
+		})
+	}
+}
+
+func TestCopyDatabaseKeepsOlderSQLiteVersions(t *testing.T) {
+	for index, schema := range []string{schemaV1, schemaV1 + migrateV1ToV2, schemaV1 + migrateV1ToV2 + migrateV2ToV3} {
+		version := index + 1
+		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
+			dir := t.TempDir()
+			source := filepath.Join(dir, "source.sqlite")
+			legacy, err := sqliteDatabase(source, "rwc")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer legacy.Close()
+			if _, err := legacy.Exec(schema + `INSERT INTO oidc_flows VALUES ('state',x'01','nonce','verifier',9999999999);`); err != nil {
+				t.Fatal(err)
+			}
+			copyPath := filepath.Join(dir, "copy.sqlite")
+			if err := CopyDatabase(t.Context(), source, copyPath); err != nil {
+				t.Fatal(err)
+			}
+			copyDB, err := sqliteDatabase(copyPath, "ro")
+			if err != nil {
+				t.Fatal(err)
+			}
+			defer copyDB.Close()
+			checkDBInt(t, copyDB, "PRAGMA user_version", version)
+			checkDBInt(t, copyDB, "SELECT count(*) FROM oidc_flows", 0)
+			checkDBInt(t, copyDB, "SELECT count(*) FROM sqlite_schema WHERE name='bots'", 0)
+			checkDBInt(t, legacy, "SELECT count(*) FROM oidc_flows", 1)
 		})
 	}
 }

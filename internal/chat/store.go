@@ -12,7 +12,10 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const currentSchemaVersion = 3
+const (
+	botSchemaVersion     = 4
+	currentSchemaVersion = botSchemaVersion
+)
 
 const schemaV1 = `
 CREATE TABLE users (
@@ -85,6 +88,17 @@ UPDATE members SET membership_id = lower(hex(randomblob(16)));
 PRAGMA user_version = 3;
 `
 
+const migrateV3ToV4 = `
+CREATE TABLE bots (
+  id TEXT PRIMARY KEY NOT NULL,
+  owner_id INTEGER NOT NULL REFERENCES users(id),
+  display_name TEXT NOT NULL,
+  token_hash BLOB UNIQUE CHECK (token_hash IS NULL OR (typeof(token_hash) = 'blob' AND length(token_hash) = 32))
+);
+CREATE INDEX bots_owner ON bots(owner_id, id);
+PRAGMA user_version = 4;
+`
+
 func openDB(path string) (*sql.DB, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -124,6 +138,11 @@ func openDB(path string) (*sql.DB, error) {
 		case 2:
 			if _, err := tx.ExecContext(ctx, migrateV2ToV3); err != nil {
 				return fmt.Errorf("SQLite 从 v2 迁移到 v3 失败: %w", err)
+			}
+			fallthrough
+		case 3:
+			if _, err := tx.ExecContext(ctx, migrateV3ToV4); err != nil {
+				return fmt.Errorf("SQLite 从 v3 迁移到 v4 失败: %w", err)
 			}
 			return nil
 		case currentSchemaVersion:

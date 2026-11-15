@@ -2,13 +2,13 @@
 
 更新日期 2026-11-15。
 
-**P2 群聊扩展与内测完善已开始设计。** 当前推进 `BOT-01`。草案已定义独立身份和凭据、群安装及撤权、备份恢复行为，并列出三项实施任务和验收条件。入口和权限合同待评审，实施待开始。[BOT-01 设计草案](../topics/bots.md#bot-01-design)
+**P2 群聊扩展与内测完善正在实施。** `BOT-01-01` 的独立身份、凭据和 SQLite v4 迁移已通过本机验收。下一项是 `BOT-01-02` 群安装与撤权，随后接 Web 管理及恢复联合复验。[本机验收记录](../records/2026-11-15-bot-identity-credentials.md) · [群安装与撤权](../topics/bots.md#bot-01-02)
 
 **P1 Web 聊天与自部署内测的候选版本已通过本机联合验收。** 本地检查基线、合成预览 v1 样本、默认准入与本地会话、公网邀请码、私聊唯一性和成员操作、外部登录禁用复验已通过单项验收。[基线和迁移样本](../records/2026-11-14-p1-local-baseline.md) · [本地会话验收](../records/2026-11-15-auth-local-sessions.md) · [邀请码验收](../records/2026-11-15-auth-invite.md) · [会话与成员验收](../records/2026-11-15-msg-room-membership.md) · [外部登录禁用验收](../records/2026-11-15-auth-oidc-disabled.md)
 
 群成员本次加入边界和 SQLite v2 迁移已联合通过验收。消息确认与重试、Markdown 正文与渲染、分页与补拉已通过单项验收。[迁移与历史授权记录](../records/2026-11-15-membership-sqlite-v2.md) · [消息确认与 Markdown 验收](../records/2026-11-15-message-confirmation-markdown.md) · [分页与补拉验收](../records/2026-11-15-message-paging-sync.md)
 
-Web 本地准入与聊天主路径、发送恢复与撤权已通过单项验收。SQLite 当前版本为 v3。[桌面与窄屏 Web 验收](../records/2026-11-15-web-local-chat.md) · [Web 恢复与成员资格验收](../records/2026-11-15-web-recovery.md)
+Web 本地准入与聊天主路径、发送恢复与撤权已通过单项验收。[桌面与窄屏 Web 验收](../records/2026-11-15-web-local-chat.md) · [Web 恢复与成员资格验收](../records/2026-11-15-web-recovery.md)
 
 完整多阶段候选镜像和本机 HTTPS 双实例已通过单项验收。Linux ARM64 候选标签为 `radishchat:p1-ops-01-03-20261115`。[部署说明](../../deploy/README.md) · [候选镜像与 HTTPS 验收](../records/2026-11-15-candidate-https.md)
 

@@ -22,19 +22,19 @@ func TestOpenDBInitializesCurrentSchemaAndRejectsUnknownVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	checkDBInt(t, db, "PRAGMA user_version", 3)
+	checkDBInt(t, db, "PRAGMA user_version", currentSchemaVersion)
 	checkDBInt(t, db, "SELECT count(*) FROM pragma_table_info('members') WHERE name='joined_after_message_id'", 1)
 	checkDBInt(t, db, "SELECT count(*) FROM pragma_table_info('members') WHERE name='membership_id'", 1)
-	if _, err := db.Exec("PRAGMA user_version = 4"); err != nil {
+	if _, err := db.Exec("PRAGMA user_version = 999"); err != nil {
 		t.Fatal(err)
 	}
 	if next, err := openDB(path); err == nil {
 		next.Close()
 		t.Fatal("unknown version opened successfully")
-	} else if !strings.Contains(err.Error(), "未支持的数据库版本 4") {
+	} else if !strings.Contains(err.Error(), "未支持的数据库版本 999") {
 		t.Fatal(err)
 	}
-	checkDBInt(t, db, "PRAGMA user_version", 4)
+	checkDBInt(t, db, "PRAGMA user_version", 999)
 }
 
 func TestMigrateV1RollsBackWhenBackfillFails(t *testing.T) {
@@ -75,7 +75,7 @@ CREATE TRIGGER fixture_stop_backfill BEFORE UPDATE ON members
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { db.Close() })
-		checkDBInt(t, db, "PRAGMA user_version", 3)
+		checkDBInt(t, db, "PRAGMA user_version", currentSchemaVersion)
 		checkDBInt(t, db, "SELECT count(*) FROM members WHERE room_id=1 AND joined_after_message_id=7", 2)
 		checkDBInt(t, db, "SELECT count(*) FROM members WHERE room_id=2 AND joined_after_message_id=0", 2)
 		checkDBInt(t, db, "SELECT count(*) FROM messages", 2)
@@ -122,7 +122,7 @@ CREATE TRIGGER fixture_stop_v3 BEFORE UPDATE ON members
 		if err != nil {
 			t.Fatal(err)
 		}
-		checkDBInt(t, db, "PRAGMA user_version", 3)
+		checkDBInt(t, db, "PRAGMA user_version", currentSchemaVersion)
 		checkDBInt(t, db, "SELECT joined_after_message_id FROM members", 7)
 		var id string
 		if err := db.QueryRow("SELECT membership_id FROM members").Scan(&id); err != nil {
@@ -132,8 +132,43 @@ CREATE TRIGGER fixture_stop_v3 BEFORE UPDATE ON members
 			t.Fatal(err)
 		}
 		if len(id) != 32 || (firstID != "" && firstID != id) {
-			t.Fatal("membership ID is missing or changed after reopening v3")
+			t.Fatal("membership ID is missing or changed after reopening the migrated database")
 		}
 		firstID = id
 	}
+}
+
+func TestMigrateV3RollsBackBotSchemaWhenIndexCreationFails(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chat.sqlite")
+	legacy, err := sqliteDatabase(path, "rwc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacy.Close()
+	if _, err := legacy.Exec(schemaV1 + migrateV1ToV2 + migrateV2ToV3 + `
+INSERT INTO users(id,username,display_name) VALUES (1,'alice','Alice');
+CREATE INDEX bots_owner ON users(display_name);
+`); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := openDB(path); err == nil {
+		next.Close()
+		t.Fatal("v4 migration unexpectedly succeeded")
+	} else if !strings.Contains(err.Error(), "SQLite 从 v3 迁移到 v4 失败") {
+		t.Fatal(err)
+	}
+	checkDBInt(t, legacy, "PRAGMA user_version", 3)
+	checkDBInt(t, legacy, "SELECT count(*) FROM sqlite_schema WHERE name='bots'", 0)
+	checkDBInt(t, legacy, "SELECT count(*) FROM users WHERE username='alice'", 1)
+	if _, err := legacy.Exec("DROP INDEX bots_owner"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := openDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	checkDBInt(t, db, "PRAGMA user_version", currentSchemaVersion)
+	checkDBInt(t, db, "SELECT count(*) FROM bots", 0)
+	checkDBInt(t, db, "SELECT count(*) FROM users WHERE username='alice'", 1)
 }

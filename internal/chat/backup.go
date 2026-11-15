@@ -9,7 +9,7 @@ import (
 	"path/filepath"
 )
 
-// CopyDatabase 写入一份保留数据库版本和业务数据、清除认证会话的副本。
+// CopyDatabase 写入一份保留数据库版本和业务数据、清除认证状态与凭据的副本。
 func CopyDatabase(ctx context.Context, source, destination string) error {
 	source, err := filepath.Abs(source)
 	if err != nil {
@@ -94,8 +94,17 @@ func prepareDatabaseCopy(ctx context.Context, path string) error {
 		return err
 	}
 	return transaction(ctx, db, func(tx *sql.Tx) error {
+		var version int
+		if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
+			return err
+		}
 		if _, err := tx.ExecContext(ctx, "DELETE FROM sessions; DELETE FROM oidc_flows"); err != nil {
 			return err
+		}
+		if version >= botSchemaVersion {
+			if _, err := tx.ExecContext(ctx, "UPDATE bots SET token_hash=NULL WHERE token_hash IS NOT NULL"); err != nil {
+				return fmt.Errorf("清除 Bot 凭据: %w", err)
+			}
 		}
 		var integrity string
 		if err := tx.QueryRowContext(ctx, "PRAGMA integrity_check").Scan(&integrity); err != nil {
