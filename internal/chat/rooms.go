@@ -337,7 +337,8 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request, u user) {
 	rid := intID(r.PathValue("room"))
 	q := r.URL.Query()
 	before, after := intID(q.Get("before")), intID(q.Get("after"))
-	if (q.Has("before") && before == 0) || (q.Has("after") && after == 0) || (before != 0 && after != 0) {
+	hasBefore, hasAfter := q.Has("before"), q.Has("after")
+	if (hasBefore && before == 0) || (hasAfter && after == 0 && q.Get("after") != "0") || (hasBefore && hasAfter) {
 		fail(w, 400, "游标无效")
 		return
 	}
@@ -351,9 +352,9 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request, u user) {
 			FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.room_id=? AND m.id>?`
 		var rs *sql.Rows
 		switch {
-		case before != 0:
+		case hasBefore:
 			rs, err = tx.QueryContext(ctx, base+" AND m.id<? ORDER BY m.id DESC LIMIT 51", rid, current.joinedAfterMessageID, before)
-		case after != 0:
+		case hasAfter:
 			rs, err = tx.QueryContext(ctx, base+" ORDER BY m.id ASC LIMIT 51", rid, max(current.joinedAfterMessageID, after))
 		default:
 			rs, err = tx.QueryContext(ctx, base+" ORDER BY m.id DESC LIMIT 51", rid, current.joinedAfterMessageID)
@@ -373,7 +374,7 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request, u user) {
 			out.More = true
 			out.Messages = out.Messages[:50]
 		}
-		if after == 0 {
+		if !hasAfter {
 			for l, h := 0, len(out.Messages)-1; l < h; l, h = l+1, h-1 {
 				out.Messages[l], out.Messages[h] = out.Messages[h], out.Messages[l]
 			}

@@ -165,35 +165,84 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
   const composerError = tooLong ? '消息最多 8,000 个字符' : sendError;
   const request = useRef<{body: string; id: string} | null>(null);
   const feed = useRef<HTMLDivElement>(null);
-  const last = useRef(0);
+  // null 表示尚未读取，0 表示已经确认没有可见消息。
+  const newest = useRef<number | null>(null);
+  const oldest = useRef<number | null>(null);
+  const historyGeneration = useRef(0);
+  const paging = useRef<{signal: AbortSignal; refresh: () => Promise<void>} | null>(null);
   const pinBottom = useRef(true);
   const preserve = useRef(0);
 
   function merge(next: Message[]) {
     if (next.length === 0) return;
-    last.current = Math.max(last.current, ...next.map(m => m.id));
     setMessages((current) => Array.from(new Map([...current, ...next].map(m => [m.id, m])).values()).sort((a,b) => a.id - b.id));
   }
+
+  function showReadError(err: unknown) {
+    if (err instanceof RequestError && err.status === 404) {
+      historyGeneration.current++;
+      newest.current = null;
+      oldest.current = null;
+      preserve.current = 0;
+      setMessages([]);
+      setMore(false);
+      setLoaded(false);
+    }
+    setNotice(errorText(err));
+  }
+
   useEffect(() => {
     const controller = new AbortController();
-    async function sync() {
+    const {signal} = controller;
+    const path = `/rooms/${room.id}/messages`;
+    let running = false;
+    let pending = false;
+
+    async function readForward() {
+      const generation = historyGeneration.current;
       try {
-        const cursor = last.current;
-        let result = await api<Page>(`/rooms/${room.id}/messages${cursor ? '?after=' + cursor : ''}`, 'GET', undefined, controller.signal);
-        if (controller.signal.aborted) return;
-        if (!cursor) setMore(result.more);
-        merge(result.messages); setLoaded(true); setNotice('');
-        if (cursor) while (result.more && result.messages.length && !controller.signal.aborted) {
-          result = await api<Page>(`/rooms/${room.id}/messages?after=${result.messages.at(-1)!.id}`, 'GET', undefined, controller.signal);
-          if (!controller.signal.aborted) merge(result.messages);
-        }
-      } catch (err) {if (!controller.signal.aborted) {
-          if (err instanceof RequestError && err.status === 404) {setMessages([]);setMore(false);last.current=0;}
-          setNotice(errorText(err));
-        }}
+        let moreAhead = false;
+        do {
+          const after = newest.current;
+          const result = await api<Page>(after === null ? path : `${path}?after=${after}`, 'GET', undefined, signal);
+          if (signal.aborted || generation !== historyGeneration.current) return;
+          if (after === null) {
+            oldest.current = result.messages[0]?.id ?? null;
+            setMore(result.more);
+          }
+          newest.current = result.messages.at(-1)?.id ?? after ?? 0;
+          merge(result.messages);
+          setLoaded(true);
+          setNotice('');
+          moreAhead = after !== null && result.more && result.messages.length > 0;
+        } while (moreAhead);
+      } catch (err) {
+        if (!signal.aborted && generation === historyGeneration.current) showReadError(err);
+      }
     }
-    void sync();
-    return () => controller.abort();
+
+    async function refresh() {
+      pending = true;
+      if (running) return;
+      running = true;
+      try {
+        while (pending && !signal.aborted) {
+          pending = false;
+          await readForward();
+        }
+      } finally {
+        running = false;
+      }
+    }
+
+    paging.current = {signal, refresh};
+    return () => {
+      controller.abort();
+      paging.current = null;
+    };
+  }, [room.id]);
+  useEffect(() => {
+    void paging.current?.refresh();
   }, [room.id, version]);
   useEffect(() => {
     if (!feed.current) return;
@@ -204,13 +253,24 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
   }, [messages]);
 
   async function older() {
+    const before = oldest.current;
+    const signal = paging.current?.signal;
+    if (earlier || before === null || !signal) return;
+    const generation = historyGeneration.current;
     setEarlier(true);
     try {
-      const result = await api<Page>(`/rooms/${room.id}/messages?before=${messages[0].id}`);
-      preserve.current = feed.current?.scrollHeight || 0;
-      setMore(result.more); merge(result.messages); setNotice('');
-    } catch (err) {setNotice(errorText(err));}
-    finally {setEarlier(false);}
+      const result = await api<Page>(`/rooms/${room.id}/messages?before=${before}`, 'GET', undefined, signal);
+      if (signal.aborted || generation !== historyGeneration.current) return;
+      oldest.current = result.messages[0]?.id ?? before;
+      if (result.messages.length > 0) preserve.current = feed.current?.scrollHeight || 0;
+      setMore(result.more);
+      merge(result.messages);
+      setNotice('');
+    } catch (err) {
+      if (!signal.aborted && generation === historyGeneration.current) showReadError(err);
+    } finally {
+      if (!signal.aborted) setEarlier(false);
+    }
   }
   async function send(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -221,7 +281,7 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
       const sent = await api<Message>(`/rooms/${room.id}/messages`, 'POST', {markdown: text, requestId: request.current.id});
       pinBottom.current = true;
       // 先让已有增量补拉使用原游标，以免跳过比本次发送更早的对端消息。
-      setMessages(current => Array.from(new Map([...current, sent].map(m => [m.id,m])).values()).sort((a,b) => a.id - b.id));
+      merge([sent]);
       request.current = null; setText('');setPreview(false);onChange();
     } catch (err) {setSendError(errorText(err));}
     finally {setSending(false);}
@@ -269,12 +329,33 @@ function Workspace({me, onLogout}: {me: Account; onLogout: () => void}) {
   const logoutRef = useRef(onLogout);
   logoutRef.current = onLogout;
   useEffect(() => {
-    const events = new EventSource('/api/v1/events');
-    events.addEventListener('sync', () => {setNetwork('已连接'); setVersion(v => v + 1);});
-    events.onerror = () => {setNetwork('正在重连'); setVersion(v => v + 1);};
+    let events: EventSource | undefined;
+    function connect() {
+      events?.close();
+      events = new EventSource('/api/v1/events');
+      events.addEventListener('sync', () => {setNetwork('已连接'); notify();});
+      events.onerror = () => {setNetwork('正在重连'); notify();};
+    }
+    function disconnect() {
+      events?.close();
+      setNetwork('正在重连');
+    }
+    function resume() {
+      connect();
+      notify();
+    }
+    if (navigator.onLine) connect();
+    else disconnect();
+    window.addEventListener('offline', disconnect);
+    window.addEventListener('online', resume);
     // 反代缓冲或实时连接到上限时也能补拉。
-    const interval = window.setInterval(() => setVersion(v => v + 1), 12000);
-    return () => {events.close();window.clearInterval(interval);};
+    const interval = window.setInterval(notify, 12000);
+    return () => {
+      events?.close();
+      window.clearInterval(interval);
+      window.removeEventListener('offline', disconnect);
+      window.removeEventListener('online', resume);
+    };
   }, []);
   useEffect(() => {
     const controller = new AbortController();
