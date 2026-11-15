@@ -10,6 +10,7 @@ const authErrors: Record<string, string> = {
   unavailable: 'Radish 登录暂不可用。', closed: '此服务器未开放新账号注册。',
 };
 const formatter = new Intl.DateTimeFormat('zh-CN', {month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit'});
+const maxMarkdownCodePoints = 8000;
 const first = (name: string) => Array.from(name)[0]?.toUpperCase() || '·';
 
 function Brand() {
@@ -160,6 +161,8 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
   const [sending, setSending] = useState(false);
   const [notice, setNotice] = useState('');
   const [sendError, setSendError] = useState('');
+  const tooLong = Array.from(text).length > maxMarkdownCodePoints;
+  const composerError = tooLong ? '消息最多 8,000 个字符' : sendError;
   const request = useRef<{body: string; id: string} | null>(null);
   const feed = useRef<HTMLDivElement>(null);
   const last = useRef(0);
@@ -211,7 +214,7 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
   }
   async function send(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (sending || !text.trim()) return;
+    if (sending || tooLong || !text.trim()) return;
     if (request.current?.body !== text) request.current = {body: text, id: crypto.randomUUID()};
     setSending(true); setSendError('');
     try {
@@ -247,10 +250,10 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
       <div className="compose-label"><label htmlFor="message">消息 <small>支持 Markdown</small></label>
         <button type="button" className="text-button" aria-pressed={preview} onClick={() => setPreview(!preview)}>{preview ? '返回编辑' : '预览'}</button></div>
       {preview && <div className="markdown preview" aria-label="消息预览">{text.trim() ? <MessageBody body={text}/> : '还没有内容'}</div>}
-      <textarea hidden={preview} id="message" placeholder="写点什么…" value={text} disabled={sending} maxLength={8000} onChange={(e) => setText(e.target.value)}
+      <textarea hidden={preview} id="message" placeholder="写点什么…" value={text} disabled={sending} onChange={(e) => setText(e.target.value)}
         onKeyDown={e => {if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.nativeEvent.isComposing) {e.preventDefault();e.currentTarget.form?.requestSubmit();}}}/>
-      <div className="compose-actions"><span className={sendError ? 'error' : 'subtle'} role={sendError ? 'alert' : undefined}>{sendError || '此会话未启用端到端加密'}</span>
-        <button className="primary" disabled={sending || !text.trim()}>发送</button></div>
+      <div className="compose-actions"><span className={composerError ? 'error' : 'subtle'} role={composerError ? 'alert' : undefined}>{composerError || '此会话未启用端到端加密'}</span>
+        <button className="primary" disabled={sending || tooLong || !text.trim()}>发送</button></div>
     </form>
   </section>;
 }
