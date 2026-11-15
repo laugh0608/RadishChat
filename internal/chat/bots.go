@@ -15,6 +15,7 @@ const (
 )
 
 var errBotCredential = errors.New("invalid Bot credential")
+var errBotPermissionChange = errors.New("existing Bot installation has different permissions")
 
 type bot struct {
 	ID          string `json:"id"`
@@ -145,6 +146,8 @@ func botError(w http.ResponseWriter, operation string, err error) {
 		fail(w, http.StatusNotFound, "Bot、群组或安装授权不存在")
 	case errors.Is(err, errOwner):
 		fail(w, http.StatusForbidden, "没有管理此 Bot 安装的权限")
+	case errors.Is(err, errBotPermissionChange):
+		fail(w, http.StatusConflict, "修改权限需先移除现有安装并重新授权")
 	default:
 		internal(w, operation, err)
 	}

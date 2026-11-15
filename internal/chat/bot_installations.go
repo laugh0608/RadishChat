@@ -8,7 +8,28 @@ import (
 const (
 	botInstallationRead   = "installation:read"
 	botInstallationHeader = "X-RadishChat-Bot-Installation"
+	botCommandsReceive    = "commands:receive"
 )
+
+func botInstallationPermissions(receiveCommands bool) []string {
+	permissions := []string{botInstallationRead}
+	if receiveCommands {
+		permissions = append(permissions, botCommandsReceive)
+	}
+	return permissions
+}
+
+func requestedBotPermissions(permissions []string) (receiveCommands, valid bool) {
+	if len(permissions) == 1 && permissions[0] == botInstallationRead {
+		return false, true
+	}
+	if len(permissions) == 2 &&
+		((permissions[0] == botInstallationRead && permissions[1] == botCommandsReceive) ||
+			(permissions[0] == botCommandsReceive && permissions[1] == botInstallationRead)) {
+		return true, true
+	}
+	return false, false
+}
 
 type botInstallationGrant struct {
 	InstallationID string   `json:"installationId,omitempty"`
@@ -60,7 +81,7 @@ func (s *Server) listGroupBotInstallations(w http.ResponseWriter, r *http.Reques
 		if includePending && member.ownerID != u.ID {
 			return errOwner
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT i.id,b.id,b.display_name,i.permission,i.state
+		rows, err := tx.QueryContext(ctx, `SELECT i.id,b.id,b.display_name,i.commands_receive,i.state
 			FROM bot_installations i JOIN bots b ON b.id=i.bot_id
 			WHERE i.room_id=? AND (i.state='active' OR ?) ORDER BY b.id`, roomID, includePending)
 		if err != nil {
@@ -69,14 +90,15 @@ func (s *Server) listGroupBotInstallations(w http.ResponseWriter, r *http.Reques
 		defer rows.Close()
 		for rows.Next() {
 			var item botInstallationPreview
-			var permission, state string
-			if err := rows.Scan(&item.InstallationID, &item.BotID, &item.DisplayName, &permission, &state); err != nil {
+			var state string
+			var receiveCommands bool
+			if err := rows.Scan(&item.InstallationID, &item.BotID, &item.DisplayName, &receiveCommands, &state); err != nil {
 				return err
 			}
 			if includePending {
 				item.State = state
 			}
-			item.Permissions = []string{permission}
+			item.Permissions = botInstallationPermissions(receiveCommands)
 			installations = append(installations, item)
 		}
 		return rows.Err()
@@ -89,6 +111,7 @@ func (s *Server) listGroupBotInstallations(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) groupBotInstallation(w http.ResponseWriter, r *http.Request, u user) {
+	var requestedCommands bool
 	if r.Method == http.MethodPut {
 		var input struct {
 			Permissions []string `json:"permissions"`
@@ -96,8 +119,10 @@ func (s *Server) groupBotInstallation(w http.ResponseWriter, r *http.Request, u 
 		if !readJSON(w, r, &input) {
 			return
 		}
-		if len(input.Permissions) != 1 || input.Permissions[0] != botInstallationRead {
-			fail(w, http.StatusBadRequest, "安装须显式授予 installation:read 权限")
+		var valid bool
+		requestedCommands, valid = requestedBotPermissions(input.Permissions)
+		if !valid {
+			fail(w, http.StatusBadRequest, "安装须授予 installation:read，可选 commands:receive")
 			return
 		}
 	}
@@ -116,17 +141,23 @@ func (s *Server) groupBotInstallation(w http.ResponseWriter, r *http.Request, u 
 		}
 
 		var botOwnerID int64
-		var permission string
+		var receiveCommands bool
 		err = tx.QueryRowContext(ctx, `SELECT b.display_name,b.owner_id,
-			coalesce(i.id,''),coalesce(i.state,'available'),coalesce(i.permission,?)
+			coalesce(i.id,''),coalesce(i.state,'available'),coalesce(i.commands_receive,0)
 			FROM bots b LEFT JOIN bot_installations i ON i.bot_id=b.id AND i.room_id=?
-			WHERE b.id=?`, botInstallationRead, roomID, view.BotID).
-			Scan(&view.DisplayName, &botOwnerID, &view.InstallationID, &view.State, &permission)
+			WHERE b.id=?`, roomID, view.BotID).
+			Scan(&view.DisplayName, &botOwnerID, &view.InstallationID, &view.State, &receiveCommands)
 		if err != nil {
 			return err
 		}
-		view.Permissions = []string{permission}
-		if r.Method != http.MethodPut || view.InstallationID != "" {
+		view.Permissions = botInstallationPermissions(receiveCommands)
+		if r.Method != http.MethodPut {
+			return nil
+		}
+		if view.InstallationID != "" {
+			if requestedCommands != receiveCommands {
+				return errBotPermissionChange
+			}
 			return nil
 		}
 
@@ -136,8 +167,9 @@ func (s *Server) groupBotInstallation(w http.ResponseWriter, r *http.Request, u 
 		}
 		view.InstallationID = randomText(16)
 		view.State = state
-		_, err = tx.ExecContext(ctx, `INSERT INTO bot_installations(id,room_id,bot_id,requested_by,state,permission)
-			VALUES (?,?,?,?,?,?)`, view.InstallationID, roomID, view.BotID, u.ID, state, botInstallationRead)
+		view.Permissions = botInstallationPermissions(requestedCommands)
+		_, err = tx.ExecContext(ctx, `INSERT INTO bot_installations(id,room_id,bot_id,requested_by,state,permission,commands_receive)
+			VALUES (?,?,?,?,?,?,?)`, view.InstallationID, roomID, view.BotID, u.ID, state, botInstallationRead, requestedCommands)
 		return err
 	})
 	if err != nil {
@@ -156,7 +188,7 @@ func (s *Server) listOwnedBotInstallations(w http.ResponseWriter, r *http.Reques
 		if err := tx.QueryRowContext(ctx, "SELECT id FROM bots WHERE id=? AND owner_id=?", botID, u.ID).Scan(&owned); err != nil {
 			return err
 		}
-		rows, err := tx.QueryContext(ctx, `SELECT i.id,i.room_id,u.username,i.state,i.permission
+		rows, err := tx.QueryContext(ctx, `SELECT i.id,i.room_id,u.username,i.state,i.commands_receive
 			FROM bot_installations i JOIN users u ON u.id=i.requested_by
 			JOIN rooms r ON r.id=i.room_id AND r.kind='group'
 			WHERE i.bot_id=? ORDER BY i.room_id`, botID)
@@ -166,11 +198,11 @@ func (s *Server) listOwnedBotInstallations(w http.ResponseWriter, r *http.Reques
 		defer rows.Close()
 		for rows.Next() {
 			var item ownedBotInstallation
-			var permission string
-			if err := rows.Scan(&item.InstallationID, &item.RoomID, &item.RequestedBy, &item.State, &permission); err != nil {
+			var receiveCommands bool
+			if err := rows.Scan(&item.InstallationID, &item.RoomID, &item.RequestedBy, &item.State, &receiveCommands); err != nil {
 				return err
 			}
-			item.Permissions = []string{permission}
+			item.Permissions = botInstallationPermissions(receiveCommands)
 			installations = append(installations, item)
 		}
 		return rows.Err()
@@ -244,28 +276,34 @@ func (s *Server) removeBotInstallation(w http.ResponseWriter, r *http.Request, u
 
 func (s *Server) botRoomInstallation(w http.ResponseWriter, r *http.Request) {
 	ctx := r.Context()
-	grant := botRoomGrant{RoomID: intID(r.PathValue("room"))}
+	var grant botRoomGrant
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		identity, err := botIdentity(r, tx)
-		if err != nil {
-			return err
-		}
-		grant.BotID = identity.ID
-		expected := r.Header.Get(botInstallationHeader)
-		var permission string
-		if err := tx.QueryRowContext(ctx, `SELECT i.id,i.permission FROM bot_installations i
-			JOIN rooms r ON r.id=i.room_id AND r.kind='group'
-			WHERE i.room_id=? AND i.bot_id=? AND i.state='active' AND i.permission=? AND (?='' OR i.id=?)`,
-			grant.RoomID, identity.ID, botInstallationRead, expected, expected).
-			Scan(&grant.InstallationID, &permission); err != nil {
-			return err
-		}
-		grant.Permissions = []string{permission}
-		return nil
+		var err error
+		grant, err = botInstallationForToken(r, tx)
+		return err
 	})
 	if err != nil {
 		botError(w, "bot-room-installation", err)
 		return
 	}
 	reply(w, http.StatusOK, grant)
+}
+
+func botInstallationForToken(r *http.Request, tx *sql.Tx) (botRoomGrant, error) {
+	var grant botRoomGrant
+	identity, err := botIdentity(r, tx)
+	if err != nil {
+		return grant, err
+	}
+	grant.RoomID = intID(r.PathValue("room"))
+	grant.BotID = identity.ID
+	expected := r.Header.Get(botInstallationHeader)
+	var receiveCommands bool
+	err = tx.QueryRowContext(r.Context(), `SELECT i.id,i.commands_receive FROM bot_installations i
+		JOIN rooms r ON r.id=i.room_id AND r.kind='group'
+		WHERE i.room_id=? AND i.bot_id=? AND i.state='active' AND i.permission=? AND (?='' OR i.id=?)`,
+		grant.RoomID, identity.ID, botInstallationRead, expected, expected).
+		Scan(&grant.InstallationID, &receiveCommands)
+	grant.Permissions = botInstallationPermissions(receiveCommands)
+	return grant, err
 }

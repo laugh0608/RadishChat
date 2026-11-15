@@ -181,15 +181,16 @@ func (s *Server) groupRoom(w http.ResponseWriter, r *http.Request, u user) {
 type membership struct {
 	roomKind             string
 	ownerID              int64
+	membershipID         string
 	joinedAfterMessageID int64
 }
 
 func access(r *http.Request, tx *sql.Tx, roomID, userID int64) (membership, error) {
 	var member membership
 	expected := r.Header.Get(membershipHeader)
-	err := tx.QueryRowContext(r.Context(), `SELECT r.kind,coalesce(r.owner_id,0),m.joined_after_message_id FROM members m JOIN rooms r ON r.id=m.room_id
+	err := tx.QueryRowContext(r.Context(), `SELECT r.kind,coalesce(r.owner_id,0),m.membership_id,m.joined_after_message_id FROM members m JOIN rooms r ON r.id=m.room_id
 		WHERE m.room_id=? AND m.user_id=? AND (?='' OR m.membership_id=?)`, roomID, userID, expected, expected).
-		Scan(&member.roomKind, &member.ownerID, &member.joinedAfterMessageID)
+		Scan(&member.roomKind, &member.ownerID, &member.membershipID, &member.joinedAfterMessageID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return member, errMissing
 	}

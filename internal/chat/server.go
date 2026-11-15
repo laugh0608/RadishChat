@@ -26,18 +26,19 @@ type Config struct {
 }
 
 type Server struct {
-	db         *sql.DB
-	mux        *http.ServeMux
-	cfg        Config
-	oidc       *oidcLogin
-	secure     bool
-	proxyIP    netip.Addr
-	inviteHash []byte
-	events     subscribers
-	gate       chan struct{}
-	rateMu     sync.Mutex
-	attempts   map[string]rateEntry
-	nextSweep  time.Time
+	db                  *sql.DB
+	mux                 *http.ServeMux
+	cfg                 Config
+	oidc                *oidcLogin
+	secure              bool
+	proxyIP             netip.Addr
+	inviteHash          []byte
+	events              subscribers
+	gate                chan struct{}
+	stopBotEventCleanup func()
+	rateMu              sync.Mutex
+	attempts            map[string]rateEntry
+	nextSweep           time.Time
 }
 
 func originURL(s string) (*url.URL, bool) {
@@ -94,10 +95,14 @@ func New(cfg Config) (*Server, error) {
 	s := &Server{db: db, mux: http.NewServeMux(), cfg: cfg, oidc: o, secure: u.Scheme == "https", proxyIP: proxyIP,
 		inviteHash: inviteHash, gate: make(chan struct{}, 4), attempts: make(map[string]rateEntry)}
 	s.routes()
+	s.stopBotEventCleanup = startBotEventCleanup(db)
 	return s, nil
 }
 
-func (s *Server) Close() error { return s.db.Close() }
+func (s *Server) Close() error {
+	s.stopBotEventCleanup()
+	return s.db.Close()
+}
 
 func (s *Server) routes() {
 	s.mux.HandleFunc("GET /healthz", func(w http.ResponseWriter, r *http.Request) {
@@ -129,6 +134,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("DELETE /api/v1/bot-installations/{installation}", s.withUser(s.removeBotInstallation))
 	s.mux.HandleFunc("GET /api/v1/bot/me", s.botMe)
 	s.mux.HandleFunc("GET /api/v1/bot/rooms/{room}/installation", s.botRoomInstallation)
+	s.mux.HandleFunc("GET /api/v1/bot/rooms/{room}/events", s.listBotEvents)
 	s.mux.HandleFunc("GET /api/v1/events", s.withUser(s.stream))
 	s.mux.HandleFunc("GET /api/v1/rooms", s.withUser(s.listRooms))
 	s.mux.HandleFunc("POST /api/v1/rooms/direct", s.withUser(s.directRoom))
@@ -136,6 +142,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/rooms/{room}/bot-installations", s.withUser(s.listGroupBotInstallations))
 	s.mux.HandleFunc("GET /api/v1/rooms/{room}/bots/{bot}/installation", s.withUser(s.groupBotInstallation))
 	s.mux.HandleFunc("PUT /api/v1/rooms/{room}/bots/{bot}/installation", s.withUser(s.groupBotInstallation))
+	s.mux.HandleFunc("POST /api/v1/rooms/{room}/bot-installations/{installation}/commands", s.withUser(s.invokeBotCommand))
 	s.mux.HandleFunc("GET /api/v1/rooms/{room}/members", s.withUser(s.listMembers))
 	s.mux.HandleFunc("POST /api/v1/rooms/{room}/members", s.withUser(s.addMember))
 	s.mux.HandleFunc("DELETE /api/v1/rooms/{room}/members/{member}", s.withUser(s.removeMember))

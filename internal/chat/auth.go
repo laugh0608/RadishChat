@@ -95,6 +95,19 @@ func verifyPassword(password, hash string) bool {
 }
 
 func (s *Server) limit(w http.ResponseWriter, key string, limit int) bool {
+	if s.takeRateSlot(key, limit) {
+		return true
+	}
+	rateLimited(w)
+	return false
+}
+
+func rateLimited(w http.ResponseWriter) {
+	w.Header().Set("Retry-After", "60")
+	fail(w, http.StatusTooManyRequests, "操作太频繁，请稍后再试")
+}
+
+func (s *Server) takeRateSlot(key string, limit int) bool {
 	now := time.Now()
 	s.rateMu.Lock()
 	defer s.rateMu.Unlock()
@@ -111,8 +124,6 @@ func (s *Server) limit(w http.ResponseWriter, key string, limit int) bool {
 		e = rateEntry{until: now.Add(time.Minute)}
 	}
 	if e.count >= limit || (!exists && len(s.attempts) >= 10000) {
-		w.Header().Set("Retry-After", "60")
-		fail(w, 429, "操作太频繁，请稍后再试")
 		return false
 	}
 	e.count++

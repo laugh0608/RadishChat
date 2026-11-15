@@ -46,7 +46,7 @@ Bot 所有者与群主的权限各自按当前账号校验。跨账号请求只�
 | `GET /bots`、`POST /bots` | 所有者列出自己的 Bot 或用展示名创建 Bot。创建返回 Bot ID 和展示名。 |
 | `POST /bots/{bot}/credential/rotate`、`DELETE /bots/{bot}/credential` | 所有者首次签发或轮换凭据，或撤销当前凭据。一次轮换只返回一份新明文，撤销可安全重复。 |
 | `GET /rooms/{room}/bot-installations` | 当前群成员查看生效安装，返回安装 ID、Bot ID、展示名和实际权限。 |
-| `GET /rooms/{room}/bots/{bot}/installation`、`PUT /rooms/{room}/bots/{bot}/installation` | 群主按 Bot ID 查看待安装的 Bot 名称、权限及当前安装状态，再显式提交 `permissions` 发起安装。本批仅接受 `["installation:read"]`，缺失或未知权限返回 `400`。安装请求返回安装 ID 和待审批或已生效状态。 |
+| `GET /rooms/{room}/bots/{bot}/installation`、`PUT /rooms/{room}/bots/{bot}/installation` | 群主按 Bot ID 查看待安装的 Bot 名称、权限及当前安装状态，再显式提交 `permissions`。必须授予 `installation:read`，可另行授予 `commands:receive`。缺失或未知权限返回 `400`。修改现有安装的权限返回 `409`，须撤销旧安装后重新授予。 |
 | `GET /bots/{bot}/installations`、`POST /bots/{bot}/installations/{installation}/approve` | Bot 所有者查看本人 Bot 的安装与待审批请求，或批准当前请求。 |
 | `DELETE /bot-installations/{installation}` | 群主或该 Bot 的所有者撤回、拒绝或移除指定安装。使用安装 ID 定位，旧请求无法移除新的安装。 |
 | `GET /bot/me`、`GET /bot/rooms/{room}/installation` | Bot 验证自己的身份或查询指定群的有效安装。安装查询仅返回 Bot ID、群 ID、安装 ID 和权限。可用 `X-RadishChat-Bot-Installation` 绑定期望的安装 ID。 |
@@ -73,7 +73,42 @@ Bot 凭据缺失、无效或失效时返回 `401`，附 Bearer 质询。有效�
 
 ## BOT-02 事件、命令和示例 Bot
 
-- 阶段与状态：P2。规划，待开始。
-- 范围：明确事件版本、重试语义、速率限制、命令范围和自托管接入。用部署通知或显式命令作参考案例。
-- 依赖与基础：依赖 BOT-01、MSG-02。Webhook 或轮询先评估交付成本、可靠性和运维影响。
-- 验收：Bot 仅获得授权事件，掉线、重试及撤销可验证。独立开发者可按接口文档编写第二个 Bot。
+- P2。短轮询及显式命令范围已确认。`BOT-02-01` 的入队与拉取 API 已实现，回复与群展示按后续实施项推进。
+- 依赖 [BOT-01](#bot-01) 的凭据与安装授权，沿用 [MSG-02](messaging.md#msg-02) 的持久化顺序、游标和提交后确认。群成员及聊天历史边界继续由 [MSG-01](messaging.md#msg-01) 校验。
+- 首批交付目标是第三方在本机自托管示例 Bot，收到群成员明确发出的命令并以 Bot 身份回复，断线、重试、轮换和移除均有可复验结果。
+
+<a id="bot-02-delivery"></a>
+
+### 交付方式与授权
+
+首批采用 Bot 主动发起的 REST 短轮询。事件保存在实例现有 SQLite 中，按安装读取，Go 服务可以在提交后立即返回。Webhook 需要实例主动访问外部地址，并另定回调地址校验、签名、投递重试及失败留存，等实际有回调需求时评估。长轮询需要管理连接寿命和反代超时，等短轮询的延迟和负载有实测数据后再评估。普通聊天继续使用现有 SSE 同步提示。
+
+群主安装时明确授予 `commands:receive`。已安装的 `installation:read` 保持原授权。新增权限经重新授予并生成新的安装 ID，跨账号仍由 Bot 所有者批准。`BOT-02-02` 计划增加 `commands:reply`，与接收权限一同授予，限定为回复当前安装收到的有效命令。首个场景是普通群成员明确发出 `ping`，示例 Bot 收到命令后回复 `pong`。事件只包含成员明确提交的命令，普通聊天正文、群历史和成员名单仍在 Bot 授权范围之外。当前可用 API 提交和拉取命令，Web 命令入口随回复批次交付。[命令事件 API](../api/v1.md#bot-command-events)
+
+### 事件、游标与重试
+
+| 入口 | 接口与行为 |
+| --- | --- |
+| 真人调用命令 | `POST /api/v1/rooms/{room}/bot-installations/{installation}/commands` 使用 Cookie、同源 `Origin` 和当前成员资格。请求为 `{command, requestId}`，首批命令为 `ping`。同一事务核对普通群、当前成员、安装和权限，提交事件后返回 `202` 与事件 ID。同一安装、成员资格及 `requestId` 在去重窗口内重试返回原事件 ID，同标识改命令返回 `409`。 |
+| Bot 读取事件 | `GET /api/v1/bot/rooms/{room}/events?after=…&limit=…` 使用 Bearer 凭据，并要求 `X-RadishChat-Bot-Installation` 为当前生效安装 ID。返回 `{events, nextCursor, hasMore}`，按提交序号升序。每项只包含 `{id, type, version, occurredAt, payload}`，首种事件为 `command.requested`、版本 `1`、`payload` 为 `{"command":"ping"}`。 |
+| Bot 回复命令（计划） | `POST /api/v1/bot/rooms/{room}/events/{event}/reply` 使用同样的 Bearer 和安装 ID，请求为 `{markdown}`。同一事务复核安装、回复权限及事件归属，以安装 ID 和事件 ID 保证只落一条回复。在事件有效期内，首次返回 `201`，相同正文重试返回 `200` 和原消息，正文变化返回 `409`。这个 Bearer 写入口单独校验，真人写请求继续执行同源 `Origin` 校验。 |
+
+- 事件序号在安装内单调递增，事件 ID 和游标为绑定该安装的不透明字符串，`occurredAt` 使用 Unix 毫秒。省略 `after` 表示从安装的开始位置读取。`after` 为排他边界，空页保持原位置，`hasMore=true` 时继续翻页。默认每页 25 条，上限 50 条。游标格式、安装归属或位置错误返回 `400`。
+- 读取可以重复，每条事件可能交付多次。Bot 按实例、安装和事件去重，处理成功或确认收到原回复后再持久化游标。网络中断、超时及 `5xx` 使用带抖动的有上限退避，沿用原游标或同一事件回复。空页建议每隔 5 秒重试。每个 Bot 的每次安装每分钟可拉取 120 次，每个账号在同一安装每分钟可提交 60 条新命令。收到 `429` 遵循 `Retry-After`，已接受命令的幂等重试不占新命令配额。[HTTP 429](https://www.rfc-editor.org/rfc/rfc6585.html#section-4)
+- 每次安装保留最近 1,000 条事件，拉取时即检查 7 天有效期。后台每分钟清理过期事件，在同一事务更新清理边界。命令去重摘要独立保留 7 天，避免事件因数量限制提前清理后重复入队。游标落在保留边界之前返回 `410` 和 `resumeAfter`。示例 Bot 将记录缺口并提示操作者确认后从可用位置继续。命令请求在去重期结束后由成员重新发起。[HTTP 410](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.11)
+
+### 撤销、存储与回复兼容性
+
+- 读页与写回复都在 SQLite 事务内重新核对凭据、群类型、安装 ID 和权限。移除与待交付事件清理在同一事务提交。提交后的新请求返回 `404`，已完成授权的响应可能仍在传输，先前交给 Bot 的副本由其运行者管理。凭据撤销或轮换后旧凭据返回 `401`。示例 Bot 收到 `401` 停止使用该凭据，收到 `404` 停止该安装的读取及回复，其他安装按各自授权继续使用。[SQLite 隔离与并发](https://www.sqlite.org/isolation.html)
+- SQLite v6 增加显式接收权限、安装内单调序号、事件及独立去重摘要。迁移保留原安装权限，不自动授予命令接收。正常重启保留安装、游标边界及待交付事件。备份和恢复沿用 BOT-01 的授权清理，事件和去重记录随安装移除。恢复后重新签发、安装及批准，使用新安装的独立游标。回复批次的普通群消息历史与待交付事件分别保存。
+- 群内回复须明确显示 Bot 发送者。现有 `messages.sender_id` 只引用真人 `users`，实现回复前须评审发送者模型和迁移。保留真人作者的现有 JSON 表示，给 Bot 作者增加可区分的类型、Bot ID 和展示名。回复沿用普通群消息顺序与历史边界，发布前须核对 Web 渲染和既有 API 调用方的兼容性。
+
+### 实施与验收顺序
+
+| 任务 | 交付范围 | 单项验收 | 状态 |
+| --- | --- | --- | --- |
+| <a id="bot-02-01"></a> BOT-02-01 命令事件入队与拉取 | 新授权及迁移，真人显式 `ping` 入队，Bot 分页、限流与撤权 | 用合成账号发起真实命令，验证事务失败不产生事件、跨页有序、断线续读、重复提交不重复入队。验证错用游标、过期缺口、跨群、旧凭据及旧安装 ID 的拒绝。迁移保留原安装权限。 | 已完成。[本机验收记录](../records/2026-11-15-bot-command-delivery.md) |
+| <a id="bot-02-02"></a> BOT-02-02 Bot 回复与群展示 | 回复写入、发送者模型及 Web 命令入口和回复展示 | 模拟回复提交但响应丢失，重试只留一条 Bot 回复。核对撤权后拒绝回复、真人消息与历史保持原状、旧消息仍可读。 | 待开始 |
+| <a id="bot-02-03"></a> BOT-02-03 示例 Bot 与独立接入 | 本地运行示例、持久化游标、操作和接口文档 | 开发者按文档部署示例并实现第二个 Bot。用本机双实例验证命令、重启续读、凭据轮换、移除、备份恢复及重新安装。 | 待开始 |
+
+Bot 作者数据模型在回复批次评审。

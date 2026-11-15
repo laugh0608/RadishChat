@@ -126,6 +126,7 @@ func TestCopyDatabaseKeepsOlderSQLiteVersions(t *testing.T) {
 		schemaV1 + migrateV1ToV2,
 		schemaV1 + migrateV1ToV2 + migrateV2ToV3,
 		schemaV1 + migrateV1ToV2 + migrateV2ToV3 + migrateV3ToV4,
+		schemaV1 + migrateV1ToV2 + migrateV2ToV3 + migrateV3ToV4 + migrateV4ToV5,
 	} {
 		version := index + 1
 		t.Run(fmt.Sprintf("v%d", version), func(t *testing.T) {
@@ -156,7 +157,10 @@ INSERT INTO bots(id,owner_id,display_name,token_hash) VALUES ('fixture',1,'Fixtu
 			defer copyDB.Close()
 			checkDBInt(t, copyDB, "PRAGMA user_version", version)
 			checkDBInt(t, copyDB, "SELECT count(*) FROM oidc_flows", 0)
-			checkDBInt(t, copyDB, "SELECT count(*) FROM sqlite_schema WHERE name='bot_installations'", 0)
+			checkDBInt(t, copyDB, "SELECT count(*) FROM sqlite_schema WHERE name='bot_events'", 0)
+			if version < botInstallationSchemaVersion {
+				checkDBInt(t, copyDB, "SELECT count(*) FROM sqlite_schema WHERE name='bot_installations'", 0)
+			}
 			if version == botSchemaVersion {
 				checkDBInt(t, copyDB, "SELECT count(*) FROM bots WHERE token_hash IS NULL", 1)
 				checkDBInt(t, legacy, "SELECT count(*) FROM bots WHERE token_hash IS NOT NULL", 1)

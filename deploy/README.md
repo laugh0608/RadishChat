@@ -20,7 +20,7 @@ docker image inspect --format '{{.Id}} {{.Os}}/{{.Architecture}}' radishchat:p1-
 
 ## SQLite 备份、恢复与升级回退
 
-候选镜像中的 `radishchat backup <备份文件>` 从 `RADISHCHAT_DATABASE` 生成快照，`radishchat restore <备份文件>` 向该变量指定的新路径恢复。命令可读取 v1 至 v5 并保留原库版本，检查 SQLite 完整性和外键，清除副本内的登录会话与未完成的 OIDC 流程。v4 起副本保留 Bot 定义及所有者，清除 Bot 凭据摘要。v5 起也清除待审批和生效的安装。恢复后由 Bot 所有者重新签发凭据，群主按需重新安装。目标使用受保护的本地目录和 `0600` 的文件。命令拒绝覆盖现有数据库及其 SQLite 辅助文件。正常重启沿用原卷内的登录会话、Bot 凭据和安装。[Bot 群安装 API](../docs/api/v1.md#bot-installations)
+候选镜像中的 `radishchat backup <备份文件>` 从 `RADISHCHAT_DATABASE` 生成快照，`radishchat restore <备份文件>` 向该变量指定的新路径恢复。命令可读取 v1 至 v6 并保留原库版本，检查 SQLite 完整性和外键，清除副本内的登录会话与未完成的 OIDC 流程。v4 起副本保留 Bot 定义及所有者，清除 Bot 凭据摘要。v5 起也清除待审批和生效的安装，v6 的待交付命令事件与去重摘要随安装清除。恢复后由 Bot 所有者重新签发凭据，群主按需重新安装，Bot 使用新安装的游标。目标使用受保护的本地目录和 `0600` 的文件。命令拒绝覆盖现有数据库及其 SQLite 辅助文件。正常重启沿用原卷内的登录会话、Bot 凭据、安装及有效事件。[Bot 群安装 API](../docs/api/v1.md#bot-installations)
 
 在源实例的安装目录停止应用，将数据卷以只读方式交给带维护命令的候选镜像。备份仍含账号、密码散列、成员和消息正文。单独保存备份记录和原版本镜像标识，限制备份目录和副本的访问权限。
 

@@ -15,7 +15,7 @@ import (
 const (
 	botSchemaVersion             = 4
 	botInstallationSchemaVersion = 5
-	currentSchemaVersion         = botInstallationSchemaVersion
+	currentSchemaVersion         = 6
 )
 
 const schemaV1 = `
@@ -114,6 +114,35 @@ CREATE INDEX bot_installations_bot ON bot_installations(bot_id, room_id);
 PRAGMA user_version = 5;
 `
 
+const migrateV5ToV6 = `
+ALTER TABLE bot_installations ADD COLUMN commands_receive INTEGER NOT NULL DEFAULT 0 CHECK (commands_receive IN (0,1));
+ALTER TABLE bot_installations ADD COLUMN last_event_sequence INTEGER NOT NULL DEFAULT 0 CHECK (last_event_sequence >= 0);
+ALTER TABLE bot_installations ADD COLUMN pruned_event_sequence INTEGER NOT NULL DEFAULT 0
+  CHECK (pruned_event_sequence BETWEEN 0 AND last_event_sequence);
+CREATE TABLE bot_events (
+  installation_id TEXT NOT NULL REFERENCES bot_installations(id) ON DELETE CASCADE,
+  sequence INTEGER NOT NULL CHECK (sequence > 0),
+  occurred_at INTEGER NOT NULL,
+  kind TEXT NOT NULL,
+  version INTEGER NOT NULL CHECK (version > 0),
+  command TEXT NOT NULL,
+  PRIMARY KEY (installation_id, sequence)
+);
+CREATE INDEX bot_events_expiry ON bot_events(occurred_at);
+CREATE TABLE bot_command_requests (
+  installation_id TEXT NOT NULL REFERENCES bot_installations(id) ON DELETE CASCADE,
+  user_id INTEGER NOT NULL,
+  membership_id TEXT NOT NULL,
+  request_hash BLOB NOT NULL,
+  command_hash BLOB NOT NULL,
+  event_sequence INTEGER NOT NULL CHECK (event_sequence > 0),
+  accepted_at INTEGER NOT NULL,
+  PRIMARY KEY (installation_id, user_id, membership_id, request_hash)
+);
+CREATE INDEX bot_command_requests_expiry ON bot_command_requests(accepted_at);
+PRAGMA user_version = 6;
+`
+
 func openDB(path string) (*sql.DB, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -163,6 +192,11 @@ func openDB(path string) (*sql.DB, error) {
 		case 4:
 			if _, err := tx.ExecContext(ctx, migrateV4ToV5); err != nil {
 				return fmt.Errorf("SQLite 从 v4 迁移到 v5 失败: %w", err)
+			}
+			fallthrough
+		case 5:
+			if _, err := tx.ExecContext(ctx, migrateV5ToV6); err != nil {
+				return fmt.Errorf("SQLite 从 v5 迁移到 v6 失败: %w", err)
 			}
 			return nil
 		case currentSchemaVersion:
