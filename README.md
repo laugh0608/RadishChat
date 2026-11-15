@@ -11,6 +11,7 @@ RadishChat 是 Radish 系列独立的在线即时通讯软件，专注日常私�
 | 当前顺序、待决定事项和已知证据 | [当前状态](docs/status/current.md) |
 | 协作、分支、PR、CI 和 Rulesets | [协作约定](AGENTS.md) · [贡献指南](CONTRIBUTING.md) · [仓库治理](docs/governance/repository.md) |
 | 查看原型和本地验证 | [探索预览启动说明](docs/records/2026-11-14-preview-quickstart.md) · [原型验证记录](docs/status/2026-11-14-preview-verification.md) |
+| 部署候选镜像和复跑 HTTPS 验收 | [部署说明](deploy/README.md) |
 | 完整导航 | [文档入口](docs/README.md) |
 
 ## 许可

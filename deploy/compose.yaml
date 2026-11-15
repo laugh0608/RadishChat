@@ -1,5 +1,6 @@
 services:
   chat:
+    image: ${RADISHCHAT_IMAGE:-radishchat:local}
     build:
       context: ..
       dockerfile: Dockerfile
@@ -17,10 +18,5 @@ services:
     volumes:
       - chat-data:/data
     restart: unless-stopped
-    healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
 volumes:
   chat-data:

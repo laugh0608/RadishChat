@@ -15,10 +15,12 @@ COPY internal ./internal
 RUN CGO_ENABLED=0 go build -trimpath -o /radishchat ./cmd/radishchat
 
 FROM alpine:3.23
-RUN apk add --no-cache ca-certificates && adduser -S -u 10001 radishchat && mkdir /data && chown 10001 /data
+RUN apk add --no-cache ca-certificates && adduser -S -u 10001 radishchat && mkdir -m 0700 /data && chown 10001 /data
 COPY --from=go /radishchat /usr/local/bin/radishchat
 COPY --from=web /src/dist /app/web
 USER 10001
 ENV RADISHCHAT_LISTEN=0.0.0.0:8080 RADISHCHAT_DATABASE=/data/chat.sqlite RADISHCHAT_WEB_DIR=/app/web
 EXPOSE 8080
+HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=3 \
+    CMD ["wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8080/healthz"]
 ENTRYPOINT ["/usr/local/bin/radishchat"]
