@@ -245,6 +245,31 @@ func TestPagination(t *testing.T) {
 	}
 }
 
+func TestRadishOIDCDisabled(t *testing.T) {
+	i := newInstance(t, Config{})
+	c := browser(t)
+	var info struct{ RadishLogin *bool }
+	call(t, c, i.host.URL, "GET", "/info", nil, http.StatusOK, &info)
+	if info.RadishLogin == nil || *info.RadishLogin {
+		t.Fatal("the default instance must advertise radishLogin=false")
+	}
+	for _, endpoint := range []struct{ method, path string }{
+		{"POST", "/auth/radish/start"},
+		{"GET", "/auth/radish/callback?code=fixture&state=fixture"},
+	} {
+		res := call(t, c, i.host.URL, endpoint.method, endpoint.path, nil, http.StatusNotFound)
+		if len(res.Cookies()) != 0 || res.Header.Get("Location") != "" {
+			t.Fatalf("disabled OIDC endpoint %s issued a cookie or redirect", endpoint.path)
+		}
+	}
+	var flows, sessions int
+	err := i.s.db.QueryRow("SELECT (SELECT COUNT(*) FROM oidc_flows), (SELECT COUNT(*) FROM sessions)").Scan(&flows, &sessions)
+	if err != nil || flows != 0 || sessions != 0 {
+		t.Fatalf("disabled OIDC left %d authorization flows and %d sessions: %v", flows, sessions, err)
+	}
+	call(t, c, i.host.URL, "GET", "/me", nil, http.StatusUnauthorized)
+}
+
 func TestRadishOIDCBrowserFlow(t *testing.T) {
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
