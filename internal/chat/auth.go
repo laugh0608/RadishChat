@@ -20,6 +20,15 @@ import (
 )
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{2,31}$`)
+var inviteCodePattern = regexp.MustCompile(`^[a-f0-9]{48}$`)
+
+type RegistrationMode string
+
+const (
+	RegistrationOff    RegistrationMode = "off"
+	RegistrationOpen   RegistrationMode = "on"
+	RegistrationInvite RegistrationMode = "invite"
+)
 
 const sessionCookie = "radishchat_session"
 const sessionAge = 7 * 24 * time.Hour
@@ -33,6 +42,10 @@ type credentials struct {
 	Username    string `json:"username"`
 	Password    string `json:"password"`
 	DisplayName string `json:"displayName,omitempty"`
+}
+type registrationRequest struct {
+	credentials
+	InviteCode string `json:"inviteCode,omitempty"`
 }
 type rateEntry struct {
 	count int
@@ -136,15 +149,19 @@ func (s *Server) acquirePassword(w http.ResponseWriter) bool {
 }
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
-	if !s.cfg.AllowRegistration {
+	if s.cfg.Registration == RegistrationOff {
 		fail(w, 403, "此服务器未开放新账号注册")
 		return
 	}
 	if !s.limit(w, "register:"+s.clientHost(r), 12) {
 		return
 	}
-	var p credentials
+	var p registrationRequest
 	if !readJSON(w, r, &p) {
+		return
+	}
+	if s.cfg.Registration == RegistrationInvite && subtle.ConstantTimeCompare(digest(p.InviteCode), s.inviteHash) != 1 {
+		fail(w, 403, "请输入有效的邀请码")
 		return
 	}
 	p.Username = normalizeUser(p.Username)

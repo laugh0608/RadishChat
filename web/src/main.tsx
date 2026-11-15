@@ -75,6 +75,7 @@ function Access({info, onLogin}: {info: Info; onLogin: (a: Account) => void}) {
           <label>用户名<input name="username" autoComplete="username" required maxLength={32} placeholder="例如 radish_dev" /></label>
           {register && <label>昵称 <small>可选</small><input name="displayName" autoComplete="nickname" maxLength={48} placeholder="别人看到的名字" /></label>}
           <label>密码<input name="password" type="password" autoComplete={register ? 'new-password' : 'current-password'} minLength={register ? 10 : undefined} required placeholder={register ? '至少 10 个字符' : '输入密码'}/></label>
+          {register && info.registrationInviteRequired && <label>邀请码<input name="inviteCode" type="password" autoComplete="off" maxLength={48} required /></label>}
           <button className="primary" disabled={busy}>{register ? '注册并登录' : '登录'}</button>
         </form>
         {info.radishLogin && <button className="secondary full" disabled={busy} type="button" onClick={radishLogin}>使用 Radish 账号登录</button>}

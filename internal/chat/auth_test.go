@@ -6,36 +6,39 @@ import (
 	"net/http/httputil"
 	"net/netip"
 	"net/url"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 )
 
+const fixtureInvite = "0123456789abcdef0123456789abcdef0123456789abcdef"
+
 func TestLocalRegistrationOptions(t *testing.T) {
 	database := filepath.Join(t.TempDir(), "chat.sqlite")
 	alice := credentials{Username: "alice", Password: "fixture-only-password"}
 	for _, step := range []struct {
 		name     string
-		allow    bool
+		mode     RegistrationMode
 		username string
 		register int
 		login    int
 	}{
-		{"default_closed", false, "alice", http.StatusForbidden, http.StatusUnauthorized},
-		{"explicitly_open", true, "alice", http.StatusCreated, http.StatusOK},
-		{"closed_again", false, "other", http.StatusForbidden, http.StatusOK},
+		{"default_closed", "", "alice", http.StatusForbidden, http.StatusUnauthorized},
+		{"explicitly_open", RegistrationOpen, "alice", http.StatusCreated, http.StatusOK},
+		{"closed_again", RegistrationOff, "other", http.StatusForbidden, http.StatusOK},
 	} {
 		t.Run(step.name, func(t *testing.T) {
-			i := newInstance(t, Config{Database: database, AllowRegistration: step.allow})
+			i := newInstance(t, Config{Database: database, Registration: step.mode})
 			c := browser(t)
-			var info struct{ Registration bool }
+			var info struct{ Registration, RegistrationInviteRequired bool }
 			call(t, c, i.host.URL, "GET", "/info", nil, http.StatusOK, &info)
-			if info.Registration != step.allow {
-				t.Fatalf("registration=%v, want %v", info.Registration, step.allow)
+			if info.Registration != (step.mode == RegistrationOpen) || info.RegistrationInviteRequired {
+				t.Fatalf("unexpected registration capabilities for %q: %+v", step.mode, info)
 			}
 			res := call(t, c, i.host.URL, "POST", "/register", credentials{Username: step.username, Password: alice.Password}, step.register)
-			if !step.allow && len(res.Cookies()) != 0 {
+			if step.mode != RegistrationOpen && len(res.Cookies()) != 0 {
 				t.Fatal("closed registration issued a cookie")
 			}
 			call(t, browser(t), i.host.URL, "POST", "/login", alice, step.login)
@@ -46,11 +49,84 @@ func TestLocalRegistrationOptions(t *testing.T) {
 	}
 }
 
+func TestInviteRegistration(t *testing.T) {
+	database := filepath.Join(t.TempDir(), "chat.sqlite")
+	invite := newInstance(t, Config{Database: database, Registration: RegistrationInvite, InviteCode: fixtureInvite})
+	c := browser(t)
+	var info struct{ Registration, RegistrationInviteRequired bool }
+	call(t, c, invite.host.URL, "GET", "/info", nil, http.StatusOK, &info)
+	if !info.Registration || !info.RegistrationInviteRequired {
+		t.Fatalf("invite registration capabilities: %+v", info)
+	}
+	request := registrationRequest{credentials: credentials{Username: "alice", Password: "fixture-only-password"}}
+	verifyCounts := func(i instance, accounts, sessions int) {
+		t.Helper()
+		var gotAccounts, gotSessions int
+		err := i.s.db.QueryRow("SELECT (SELECT COUNT(*) FROM users), (SELECT COUNT(*) FROM sessions)").Scan(&gotAccounts, &gotSessions)
+		if err != nil || gotAccounts != accounts || gotSessions != sessions {
+			t.Fatalf("got %d accounts and %d sessions, want %d and %d (error %v)", gotAccounts, gotSessions, accounts, sessions, err)
+		}
+	}
+	for _, code := range []string{"", strings.Repeat("a", 48)} {
+		request.InviteCode = code
+		res := call(t, c, invite.host.URL, "POST", "/register", request, http.StatusForbidden)
+		if len(res.Cookies()) != 0 {
+			t.Fatal("rejected registration issued a cookie")
+		}
+	}
+	verifyCounts(invite, 0, 0)
+	request.InviteCode = fixtureInvite
+	var created, signedIn user
+	call(t, c, invite.host.URL, "POST", "/register", request, http.StatusCreated, &created)
+	call(t, c, invite.host.URL, "GET", "/me", nil, http.StatusOK, &signedIn)
+	if signedIn != created || created.Username != "alice" {
+		t.Fatalf("unexpected account or session: %+v, %+v", created, signedIn)
+	}
+	call(t, browser(t), invite.host.URL, "POST", "/register", request, http.StatusConflict)
+	verifyCounts(invite, 1, 1)
+	invite.host.Close()
+	invite.s.Close()
+
+	rotatedCode := strings.Repeat("b", 48)
+	rotated := newInstance(t, Config{Database: database, Registration: RegistrationInvite, InviteCode: rotatedCode})
+	request.Username = "bob"
+	c = browser(t)
+	call(t, c, rotated.host.URL, "POST", "/register", request, http.StatusForbidden)
+	verifyCounts(rotated, 1, 1)
+	request.InviteCode = rotatedCode
+	call(t, c, rotated.host.URL, "POST", "/register", request, http.StatusCreated)
+	verifyCounts(rotated, 2, 2)
+	rotated.host.Close()
+	rotated.s.Close()
+
+	closed := newInstance(t, Config{Database: database, Registration: RegistrationOff, InviteCode: rotatedCode})
+	c = browser(t)
+	request.Username = "carol"
+	call(t, c, closed.host.URL, "POST", "/register", request, http.StatusForbidden)
+	verifyCounts(closed, 2, 2)
+	call(t, c, closed.host.URL, "POST", "/login", credentials{Username: "alice", Password: request.Password}, http.StatusOK)
+}
+
+func TestInviteModeRequiresValidConfiguration(t *testing.T) {
+	for _, cfg := range []Config{{Registration: "invalid"}, {Registration: RegistrationInvite}, {Registration: RegistrationInvite, InviteCode: "short"}} {
+		cfg.PublicURL = "http://127.0.0.1:8080"
+		cfg.Database = filepath.Join(t.TempDir(), "chat.sqlite")
+		s, err := New(cfg)
+		if err == nil {
+			s.Close()
+			t.Fatal("invalid registration config allowed startup")
+		}
+		if _, err := os.Stat(cfg.Database); !os.IsNotExist(err) {
+			t.Fatalf("registration validation did not precede database initialization: %v", err)
+		}
+	}
+}
+
 func TestHTTPSLocalSession(t *testing.T) {
 	proxy := httptest.NewUnstartedServer(nil)
 	defer proxy.Close()
 	origin := "https://" + proxy.Listener.Addr().String()
-	s, err := New(Config{PublicURL: origin, Database: filepath.Join(t.TempDir(), "chat.sqlite"), AllowRegistration: true})
+	s, err := New(Config{PublicURL: origin, Database: filepath.Join(t.TempDir(), "chat.sqlite"), Registration: RegistrationOpen})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -121,7 +197,7 @@ func TestHTTPSLocalSession(t *testing.T) {
 }
 
 func TestLoginRateLimitBySource(t *testing.T) {
-	i := newInstance(t, Config{AllowRegistration: true, TrustedProxyIP: "127.0.0.1"})
+	i := newInstance(t, Config{Registration: RegistrationOpen, TrustedProxyIP: "127.0.0.1"})
 	addUser(t, i.host.URL, "alice")
 	login := func(peer string, forwarded []string, body string, status int) {
 		t.Helper()

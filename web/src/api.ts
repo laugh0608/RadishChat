@@ -2,7 +2,7 @@ export type Account = {id: number; username: string; displayName: string};
 export type Room = {id: number; kind: 'direct' | 'group'; name: string; peerUsername?: string; ownerId?: number; memberCount: number; lastMessageId: number};
 export type Message = {id: number; author: Account; markdown: string; sentAt: number};
 export type Page = {messages: Message[]; more: boolean};
-export type Info = {registration: boolean; radishLogin: boolean};
+export type Info = {registration: boolean; registrationInviteRequired?: boolean; radishLogin: boolean};
 
 export class RequestError extends Error {
   constructor(readonly status: number, message: string) { super(message); }

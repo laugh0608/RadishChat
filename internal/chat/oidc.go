@@ -175,7 +175,7 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 		var userID int64
 		err := tx.QueryRowContext(ctx, "SELECT user_id FROM external_accounts WHERE issuer=? AND subject=?", id.Issuer, id.Subject).Scan(&userID)
 		if errors.Is(err, sql.ErrNoRows) {
-			if !s.cfg.AllowRegistration {
+			if s.cfg.Registration != RegistrationOpen {
 				return errRegistrationClosed
 			}
 			// 保留前缀，避免把同名的本地账号自动合并。
