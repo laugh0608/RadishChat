@@ -15,7 +15,7 @@ import (
 const (
 	botSchemaVersion             = 4
 	botInstallationSchemaVersion = 5
-	currentSchemaVersion         = 6
+	currentSchemaVersion         = 7
 )
 
 const schemaV1 = `
@@ -143,6 +143,29 @@ CREATE INDEX bot_command_requests_expiry ON bot_command_requests(accepted_at);
 PRAGMA user_version = 6;
 `
 
+const migrateV6ToV7 = `
+ALTER TABLE bot_installations ADD COLUMN commands_reply INTEGER NOT NULL DEFAULT 0
+  CHECK (commands_reply IN (0,1) AND commands_reply <= commands_receive);
+ALTER TABLE messages RENAME TO messages_v6;
+CREATE TABLE messages (
+  id INTEGER PRIMARY KEY,
+  room_id INTEGER NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  sender_id INTEGER REFERENCES users(id),
+  sender_bot_id TEXT REFERENCES bots(id),
+  body TEXT NOT NULL,
+  sent_at INTEGER NOT NULL,
+  request_id TEXT NOT NULL,
+  CHECK ((sender_id IS NULL) != (sender_bot_id IS NULL)),
+  UNIQUE (room_id, sender_id, request_id),
+  UNIQUE (room_id, sender_bot_id, request_id)
+);
+INSERT INTO messages (id,room_id,sender_id,body,sent_at,request_id)
+  SELECT id,room_id,sender_id,body,sent_at,request_id FROM messages_v6;
+DROP TABLE messages_v6;
+CREATE INDEX messages_room ON messages(room_id, id DESC);
+PRAGMA user_version = 7;
+`
+
 func openDB(path string) (*sql.DB, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -197,6 +220,11 @@ func openDB(path string) (*sql.DB, error) {
 		case 5:
 			if _, err := tx.ExecContext(ctx, migrateV5ToV6); err != nil {
 				return fmt.Errorf("SQLite 从 v5 迁移到 v6 失败: %w", err)
+			}
+			fallthrough
+		case 6:
+			if _, err := tx.ExecContext(ctx, migrateV6ToV7); err != nil {
+				return fmt.Errorf("SQLite 从 v6 迁移到 v7 失败: %w", err)
 			}
 			return nil
 		case currentSchemaVersion:

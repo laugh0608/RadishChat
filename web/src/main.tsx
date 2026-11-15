@@ -350,7 +350,11 @@ function Conversation({me, room, version, onChange, onBack, onAccessLost}: {
       {loaded && !messages.length && <div className="quiet">对话从第一条消息开始。</div>}
       {notice && <p role="alert" className="error">{notice}</p>}
       {messages.map((m) => <article className={`message ${m.author.id === me.id ? 'mine' : ''}`} key={m.id}>
-        <div className="message-meta"><strong>{m.author.displayName}</strong><time dateTime={new Date(m.sentAt).toISOString()}>{formatter.format(m.sentAt)}</time></div>
+        <div className="message-meta">
+          <strong>{m.author.displayName}</strong>
+          {'kind' in m.author && <span className="message-bot">Bot</span>}
+          <time dateTime={new Date(m.sentAt).toISOString()}>{formatter.format(m.sentAt)}</time>
+        </div>
         <div className="markdown"><MessageBody body={m.markdown} /></div>
       </article>)}
     </div>

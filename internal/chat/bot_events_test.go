@@ -43,10 +43,15 @@ func (f botCommandFixture) installationPath(roomID int64) string {
 
 func (f botCommandFixture) installation(t *testing.T, roomID int64, receives, approve bool) botInstallationPreview {
 	t.Helper()
+	return f.installWithPermissions(t, roomID, (botCommandPermissions{receive: receives}).list(), approve)
+}
+
+func (f botCommandFixture) installWithPermissions(t *testing.T, roomID int64, permissions []string, approve bool) botInstallationPreview {
+	t.Helper()
 	var view botInstallationPreview
 	call(t, f.groupOwner, f.host.URL, http.MethodPut, f.installationPath(roomID),
-		map[string][]string{"permissions": botInstallationPermissions(receives)}, http.StatusOK, &view)
-	if view.InstallationID == "" || !slices.Equal(view.Permissions, botInstallationPermissions(receives)) {
+		map[string][]string{"permissions": permissions}, http.StatusOK, &view)
+	if view.InstallationID == "" || !slices.Equal(view.Permissions, permissions) {
 		t.Fatal("unexpected installation grant")
 	}
 	if approve {

@@ -3,6 +3,7 @@ package chat
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strings"
@@ -29,11 +30,30 @@ type room struct {
 	MembershipID  string `json:"membershipId"`
 }
 type message struct {
-	ID       int64  `json:"id"`
-	Author   user   `json:"author"`
-	Markdown string `json:"markdown"`
-	SentAt   int64  `json:"sentAt"`
+	ID        int64             `json:"id"`
+	Author    user              `json:"author"`
+	Markdown  string            `json:"markdown"`
+	SentAt    int64             `json:"sentAt"`
+	BotAuthor *botMessageAuthor `json:"-"`
 }
+
+type botMessageAuthor struct {
+	Kind        string `json:"kind"`
+	ID          string `json:"id"`
+	DisplayName string `json:"displayName"`
+}
+
+func (m message) MarshalJSON() ([]byte, error) {
+	type fields message
+	if m.BotAuthor == nil {
+		return json.Marshal(fields(m))
+	}
+	return json.Marshal(struct {
+		fields
+		Author *botMessageAuthor `json:"author"`
+	}{fields(m), m.BotAuthor})
+}
+
 type messagePage struct {
 	Messages []message `json:"messages"`
 	More     bool      `json:"more"`
@@ -359,8 +379,10 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request, u user) {
 		if err != nil {
 			return err
 		}
-		base := `SELECT m.id,u.id,u.username,u.display_name,m.body,m.sent_at
-			FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.room_id=? AND m.id>?`
+		base := `SELECT m.id,coalesce(u.id,0),coalesce(u.username,''),coalesce(u.display_name,''),
+			coalesce(b.id,''),coalesce(b.display_name,''),m.body,m.sent_at
+			FROM messages m LEFT JOIN users u ON u.id=m.sender_id LEFT JOIN bots b ON b.id=m.sender_bot_id
+			WHERE m.room_id=? AND m.id>?`
 		var rs *sql.Rows
 		switch {
 		case hasBefore:
@@ -376,8 +398,13 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request, u user) {
 		defer rs.Close()
 		for rs.Next() {
 			var m message
-			if err := rs.Scan(&m.ID, &m.Author.ID, &m.Author.Username, &m.Author.DisplayName, &m.Markdown, &m.SentAt); err != nil {
+			author := botMessageAuthor{Kind: "bot"}
+			if err := rs.Scan(&m.ID, &m.Author.ID, &m.Author.Username, &m.Author.DisplayName,
+				&author.ID, &author.DisplayName, &m.Markdown, &m.SentAt); err != nil {
 				return err
+			}
+			if author.ID != "" {
+				m.BotAuthor = &author
 			}
 			out.Messages = append(out.Messages, m)
 		}
@@ -399,6 +426,10 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request, u user) {
 	reply(w, 200, out)
 }
 
+func validMessageMarkdown(markdown string) bool {
+	return strings.TrimSpace(markdown) != "" && utf8.RuneCountInString(markdown) <= 8000
+}
+
 func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, u user) {
 	ctx := r.Context()
 	rid := intID(r.PathValue("room"))
@@ -409,7 +440,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, u user) {
 	if !readJSON(w, r, &input) {
 		return
 	}
-	if strings.TrimSpace(input.Markdown) == "" || utf8.RuneCountInString(input.Markdown) > 8000 || len(input.RequestID) < 16 ||
+	if !validMessageMarkdown(input.Markdown) || len(input.RequestID) < 16 ||
 		len(input.RequestID) > 64 || !validLabel(input.RequestID, 64) {
 		fail(w, 400, "请输入最多 8000 字的消息，以及有效的发送标识")
 		return

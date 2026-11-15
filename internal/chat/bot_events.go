@@ -69,23 +69,27 @@ func parseBotEventQuery(rawQuery, installationID string) (after int64, limit int
 	if !values.Has("after") {
 		return 0, limit, nil
 	}
-	raw := values.Get("after")
-	if len(raw) > 80 {
-		return 0, 0, errBotEventQuery
-	}
-	decoded, err := base64.RawURLEncoding.Strict().DecodeString(raw)
-	if err != nil {
-		return 0, 0, errBotEventQuery
-	}
-	installation, sequence, ok := strings.Cut(string(decoded), ":")
-	if !ok || installation != installationID {
-		return 0, 0, errBotEventQuery
-	}
-	after, err = strconv.ParseInt(sequence, 10, 64)
-	if err != nil || after < 0 || botEventCursor(installationID, after) != raw {
+	after, valid := parseBotEventCursor(values.Get("after"), installationID)
+	if !valid {
 		return 0, 0, errBotEventQuery
 	}
 	return after, limit, nil
+}
+
+func parseBotEventCursor(raw, installationID string) (int64, bool) {
+	if len(raw) > 80 {
+		return 0, false
+	}
+	decoded, err := base64.RawURLEncoding.Strict().DecodeString(raw)
+	if err != nil {
+		return 0, false
+	}
+	installation, sequence, ok := strings.Cut(string(decoded), ":")
+	if !ok || installation != installationID {
+		return 0, false
+	}
+	after, err := strconv.ParseInt(sequence, 10, 64)
+	return after, err == nil && after >= 0 && botEventCursor(installationID, after) == raw
 }
 
 func (s *Server) invokeBotCommand(w http.ResponseWriter, r *http.Request, u user) {
@@ -180,13 +184,9 @@ func (s *Server) listBotEvents(w http.ResponseWriter, r *http.Request) {
 	var resumeAfter string
 	page := botEventPage{Events: []botEvent{}}
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		grant, err := botInstallationForToken(r, tx)
+		grant, err := botEventGrant(r, tx, botCommandsReceive)
 		if err != nil {
 			return err
-		}
-		headers := r.Header.Values(botInstallationHeader)
-		if len(headers) != 1 || headers[0] != grant.InstallationID || !slices.Contains(grant.Permissions, botCommandsReceive) {
-			return errMissing
 		}
 		key := "bot-poll:" + grant.BotID + ":" + grant.InstallationID
 		if !s.takeRateSlot(key, botEventPollLimit) {
@@ -196,12 +196,8 @@ func (s *Server) listBotEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		// Check the expiry boundary even before the next physical cleanup.
-		cutoff := time.Now().Add(-botEventRetention).UnixMilli()
-		var last, floor int64
-		if err := tx.QueryRowContext(ctx, `SELECT i.last_event_sequence,max(i.pruned_event_sequence,coalesce((
-			SELECT max(sequence) FROM bot_events WHERE installation_id=i.id AND occurred_at<=?
-		),0)) FROM bot_installations i WHERE i.id=?`, cutoff, grant.InstallationID).Scan(&last, &floor); err != nil {
+		last, floor, err := botEventWindow(ctx, tx, grant.InstallationID)
+		if err != nil {
 			return err
 		}
 		if after > last {
@@ -223,6 +219,27 @@ func (s *Server) listBotEvents(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	reply(w, http.StatusOK, page)
+}
+
+func botEventGrant(r *http.Request, tx *sql.Tx, permission string) (botRoomGrant, error) {
+	grant, err := botInstallationForToken(r, tx)
+	if err != nil {
+		return grant, err
+	}
+	headers := r.Header.Values(botInstallationHeader)
+	if len(headers) != 1 || headers[0] != grant.InstallationID || !slices.Contains(grant.Permissions, permission) {
+		return grant, errMissing
+	}
+	return grant, nil
+}
+
+func botEventWindow(ctx context.Context, tx *sql.Tx, installationID string) (last, floor int64, err error) {
+	// Check the expiry boundary even before the next physical cleanup.
+	cutoff := time.Now().Add(-botEventRetention).UnixMilli()
+	err = tx.QueryRowContext(ctx, `SELECT i.last_event_sequence,max(i.pruned_event_sequence,coalesce((
+		SELECT max(sequence) FROM bot_events WHERE installation_id=i.id AND occurred_at<=?
+	),0)) FROM bot_installations i WHERE i.id=?`, cutoff, installationID).Scan(&last, &floor)
+	return last, floor, err
 }
 
 func readBotEventPage(ctx context.Context, tx *sql.Tx, installationID string, after int64, limit int, page *botEventPage) error {

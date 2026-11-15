@@ -11,6 +11,13 @@ type InstallationPreview = {
 };
 
 const installationState = {active: '已生效', pending: '待 Bot 所有者审批', available: '可安装'};
+const receiveCommands = 'commands:receive';
+const replyToCommands = 'commands:reply';
+const permissionLabels: Record<string, string> = {
+  'installation:read': '查看本群的 Bot 安装状态',
+  [receiveCommands]: '接收群成员主动发出的命令',
+  [replyToCommands]: '回复收到的群命令',
+};
 
 function useBotList<T>(path: string, version: number, membershipId?: string) {
   const [result, setResult] = useState<{items?: T[]; error?: unknown}>({});
@@ -66,7 +73,7 @@ function BotListStatus({items, error, empty}: {items?: unknown[]; error?: unknow
 function BotPermissions({permissions}: {permissions: string[]}) {
   return <ul className="bot-permissions" aria-label="授权权限">
     {permissions.map(permission => <li key={permission}>
-      {permission === 'installation:read' ? '查看本群的 Bot 安装状态' : permission}
+      {permissionLabels[permission] ?? permission}
     </li>)}
   </ul>;
 }
@@ -198,8 +205,12 @@ export function GroupBots({room, canManage, version, onChange, onAccessLost}: {
   const listPath = base + '/bot-installations' + (canManage ? '?includePending=1' : '');
   const {items, error: listError} = useBotList<GroupInstallation>(listPath, version, room.membershipId);
   const {busy, error, run} = useBotAction();
+  const pendingCommands = useRef(new Map<string, string>());
+  const [notice, setNotice] = useState('');
   const [botId, setBotId] = useState('');
   const [preview, setPreview] = useState<InstallationPreview>();
+  const [allowCommands, setAllowCommands] = useState(false);
+  const [allowReplies, setAllowReplies] = useState(false);
 
   useEffect(() => {
     if (listError instanceof RequestError && listError.status === 404) onAccessLost();
@@ -208,6 +219,9 @@ export function GroupBots({room, canManage, version, onChange, onAccessLost}: {
   function previewInstall(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setPreview(undefined);
+    setAllowCommands(false);
+    setAllowReplies(false);
+    setNotice('');
     const id = botId.trim();
     if (!id) return;
     void run(signal => api<InstallationPreview>(base + '/bots/' + encodeURIComponent(id) + '/installation',
@@ -216,7 +230,10 @@ export function GroupBots({room, canManage, version, onChange, onAccessLost}: {
 
   function install(current: InstallationPreview) {
     const path = base + '/bots/' + encodeURIComponent(current.botId) + '/installation';
-    void run(signal => api<InstallationPreview>(path, 'PUT', {permissions: current.permissions}, signal, room.membershipId), () => {
+    const permissions = [...current.permissions];
+    if (allowCommands) permissions.push(receiveCommands);
+    if (allowCommands && allowReplies) permissions.push(replyToCommands);
+    void run(signal => api<InstallationPreview>(path, 'PUT', {permissions}, signal, room.membershipId), () => {
       setPreview(undefined);
       setBotId('');
       onChange();
@@ -224,10 +241,24 @@ export function GroupBots({room, canManage, version, onChange, onAccessLost}: {
   }
 
   function remove(item: GroupInstallation) {
+    setNotice('');
     void run(signal => api('/bot-installations/' + encodeURIComponent(item.installationId),
       'DELETE', undefined, signal, room.membershipId), () => {
+      pendingCommands.current.delete(item.installationId);
       setPreview(undefined);
       onChange();
+    }, onChange);
+  }
+
+  function sendPing(item: GroupInstallation) {
+    setNotice('');
+    const id = item.installationId;
+    const requestId = pendingCommands.current.get(id) ?? crypto.randomUUID();
+    pendingCommands.current.set(id, requestId);
+    const path = base + '/bot-installations/' + encodeURIComponent(id) + '/commands';
+    void run(signal => api(path, 'POST', {command: 'ping', requestId}, signal, room.membershipId), () => {
+      pendingCommands.current.delete(id);
+      setNotice(`已向 ${item.displayName} 提交 ping`);
     }, onChange);
   }
 
@@ -237,8 +268,13 @@ export function GroupBots({room, canManage, version, onChange, onAccessLost}: {
       {items.map(item => <li key={item.installationId} className="stack">
         <div><strong>{item.displayName}</strong><small>{installationState[item.state ?? 'active']}</small></div>
         <BotPermissions permissions={item.permissions} />
-        {canManage && <div className="row"><button type="button" className="secondary" disabled={busy}
-          onClick={() => remove(item)}>{item.state === 'pending' ? '撤回安装' : '移除安装'}</button></div>}
+        <div className="row">
+          {item.state !== 'pending' && item.permissions.includes(receiveCommands) &&
+            <button type="button" className="secondary" disabled={busy} aria-label={`向 ${item.displayName} 发送 ping`}
+              onClick={() => sendPing(item)}>发送 ping</button>}
+          {canManage && <button type="button" className="secondary" disabled={busy}
+            onClick={() => remove(item)}>{item.state === 'pending' ? '撤回安装' : '移除安装'}</button>}
+        </div>
       </li>)}
     </ul>}
     {canManage && <form className="stack" onSubmit={previewInstall}>
@@ -249,12 +285,25 @@ export function GroupBots({room, canManage, version, onChange, onAccessLost}: {
     {canManage && preview && <div className="bot-preview stack" aria-label="Bot 安装预览">
       <div><strong>{preview.displayName}</strong><small>{installationState[preview.state]}</small></div>
       <BotPermissions permissions={preview.permissions} />
+      {preview.state === 'available' && <>
+        <label className="bot-option">
+          <input type="checkbox" checked={allowCommands} disabled={busy}
+            onChange={event => {setAllowCommands(event.target.checked);if (!event.target.checked) setAllowReplies(false);}} />
+          {permissionLabels[receiveCommands]}
+        </label>
+        <label className="bot-option">
+          <input type="checkbox" checked={allowReplies} disabled={busy || !allowCommands}
+            onChange={event => setAllowReplies(event.target.checked)} />
+          {permissionLabels[replyToCommands]}
+        </label>
+      </>}
       <div className="row">
         {preview.state === 'available' && <button type="button" className="primary" disabled={busy}
           onClick={() => install(preview)}>确认安装</button>}
         <button type="button" className="secondary" disabled={busy} onClick={() => setPreview(undefined)}>关闭预览</button>
       </div>
     </div>}
+    {notice && <p role="status" className="subtle">{notice}</p>}
     {error && <p role="alert" className="error">{error}</p>}
   </aside>;
 }

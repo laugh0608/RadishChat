@@ -2,7 +2,7 @@
 
 更新日期 2026-11-15。
 
-**P2 群聊扩展与内测完善正在实施。** `BOT-01` 已通过本机双实例验收。`BOT-02-01` 的命令入队、短轮询与撤权已通过本机验收，SQLite 当前版本为 v6。下一项是 `BOT-02-02`，先核对 Bot 作者数据模型和兼容性，再接回复写入及 Web 展示。[命令事件验收](../records/2026-11-15-bot-command-delivery.md) · [Bot 回复与群展示](../topics/bots.md#bot-02-02)
+**P2 群聊扩展与内测完善正在实施。** `BOT-01` 已通过本机双实例验收。`BOT-02-01` 和 `BOT-02-02` 已通过本机验收，涵盖命令入队、短轮询、获授权的回复和 Web 群内展示，SQLite 当前版本为 v7。下一项是 `BOT-02-03`，交付可独立运行的示例 Bot、持久化游标和接入说明，再用第二个 Bot 验证断线续读、凭据轮换和恢复后重新安装。[命令事件验收](../records/2026-11-15-bot-command-delivery.md) · [Bot 回复验收](../records/2026-11-15-bot-command-replies.md) · [示例 Bot 与独立接入](../topics/bots.md#bot-02-03)
 
 **P1 Web 聊天与自部署内测的候选版本已通过本机联合验收。** 本地检查基线、合成预览 v1 样本、默认准入与本地会话、公网邀请码、私聊唯一性和成员操作、外部登录禁用复验已通过单项验收。[基线和迁移样本](../records/2026-11-14-p1-local-baseline.md) · [本地会话验收](../records/2026-11-15-auth-local-sessions.md) · [邀请码验收](../records/2026-11-15-auth-invite.md) · [会话与成员验收](../records/2026-11-15-msg-room-membership.md) · [外部登录禁用验收](../records/2026-11-15-auth-oidc-disabled.md)
 

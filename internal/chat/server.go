@@ -135,6 +135,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("GET /api/v1/bot/me", s.botMe)
 	s.mux.HandleFunc("GET /api/v1/bot/rooms/{room}/installation", s.botRoomInstallation)
 	s.mux.HandleFunc("GET /api/v1/bot/rooms/{room}/events", s.listBotEvents)
+	s.mux.HandleFunc(botReplyRoute, s.replyBotEvent)
 	s.mux.HandleFunc("GET /api/v1/events", s.withUser(s.stream))
 	s.mux.HandleFunc("GET /api/v1/rooms", s.withUser(s.listRooms))
 	s.mux.HandleFunc("POST /api/v1/rooms/direct", s.withUser(s.directRoom))
@@ -172,8 +173,11 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		case http.MethodGet, http.MethodHead, http.MethodOptions:
 		default:
 			if r.Header.Get("Origin") != s.cfg.PublicURL {
-				fail(w, 403, "请求来源不匹配")
-				return
+				// The reply route uses explicit Bearer credentials, never a session cookie.
+				if _, pattern := s.mux.Handler(r); pattern != botReplyRoute {
+					fail(w, 403, "请求来源不匹配")
+					return
+				}
 			}
 		}
 	}

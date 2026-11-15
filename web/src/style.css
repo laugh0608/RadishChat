@@ -77,6 +77,7 @@ input::placeholder,textarea::placeholder{color:#647067}
 .message.mine{margin-left:auto;background:#e8efe4;border-radius:14px 0 14px 14px}
 .message-meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;margin-bottom:5px;font-size:.73rem;color:var(--muted)}
 .message-meta strong{color:#305843;overflow-wrap:anywhere}
+.message-bot{border:1px solid var(--rule);border-radius:5px;padding:0 4px;color:var(--green);background:var(--pale)}
 .markdown{font-size:.94rem;line-height:1.6;overflow-wrap:anywhere;min-width:0}
 .markdown>*{margin:0 0 .4em}
 .markdown>:last-child{margin-bottom:0}
@@ -111,6 +112,8 @@ input::placeholder,textarea::placeholder{color:#647067}
 .bot-list button[aria-pressed=true]{background:var(--pale);border-color:#aabdab}
 .bot-list strong,.bot-list small,.bot-preview strong,.bot-preview small{display:block;overflow-wrap:anywhere}
 .bot-permissions{margin:0;padding-inline-start:18px;color:var(--muted);font-size:.84rem}
+.bot-option{display:flex;align-items:center}
+.bot-option input{width:auto;accent-color:var(--green)}
 .group-bots{padding:12px 24px;max-height:38vh;overflow:auto;flex:none;background:var(--paper);border-bottom:1px solid var(--rule)}
 .group-bots>*{width:min(100%,520px)}
 .initial{display:grid;gap:16px;justify-content:center;justify-items:start;padding:12vh 24px}
