@@ -22,18 +22,19 @@ func TestOpenDBInitializesCurrentSchemaAndRejectsUnknownVersion(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer db.Close()
-	checkDBInt(t, db, "PRAGMA user_version", 2)
+	checkDBInt(t, db, "PRAGMA user_version", 3)
 	checkDBInt(t, db, "SELECT count(*) FROM pragma_table_info('members') WHERE name='joined_after_message_id'", 1)
-	if _, err := db.Exec("PRAGMA user_version = 3"); err != nil {
+	checkDBInt(t, db, "SELECT count(*) FROM pragma_table_info('members') WHERE name='membership_id'", 1)
+	if _, err := db.Exec("PRAGMA user_version = 4"); err != nil {
 		t.Fatal(err)
 	}
 	if next, err := openDB(path); err == nil {
 		next.Close()
 		t.Fatal("unknown version opened successfully")
-	} else if !strings.Contains(err.Error(), "未支持的数据库版本 3") {
+	} else if !strings.Contains(err.Error(), "未支持的数据库版本 4") {
 		t.Fatal(err)
 	}
-	checkDBInt(t, db, "PRAGMA user_version", 3)
+	checkDBInt(t, db, "PRAGMA user_version", 4)
 }
 
 func TestMigrateV1RollsBackWhenBackfillFails(t *testing.T) {
@@ -74,12 +75,65 @@ CREATE TRIGGER fixture_stop_backfill BEFORE UPDATE ON members
 			t.Fatal(err)
 		}
 		t.Cleanup(func() { db.Close() })
-		checkDBInt(t, db, "PRAGMA user_version", 2)
+		checkDBInt(t, db, "PRAGMA user_version", 3)
 		checkDBInt(t, db, "SELECT count(*) FROM members WHERE room_id=1 AND joined_after_message_id=7", 2)
 		checkDBInt(t, db, "SELECT count(*) FROM members WHERE room_id=2 AND joined_after_message_id=0", 2)
 		checkDBInt(t, db, "SELECT count(*) FROM messages", 2)
+		checkDBInt(t, db, "SELECT count(DISTINCT membership_id) FROM members WHERE length(membership_id)=32", 4)
 		if err := db.Close(); err != nil {
 			t.Fatal(err)
 		}
+	}
+}
+
+func TestMigrateV2PreservesBoundaryAndMembershipSurvivesRestart(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chat.sqlite")
+	legacy, err := sql.Open("sqlite", path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacy.Close()
+	if _, err := legacy.Exec(schemaV1 + migrateV1ToV2 + `
+INSERT INTO users(id,username,display_name) VALUES (1,'alice','Alice');
+INSERT INTO rooms(id,kind,name,owner_id) VALUES (2,'group','Fixture',1);
+INSERT INTO members(room_id,user_id,joined_after_message_id) VALUES (2,1,7);
+INSERT INTO messages(id,room_id,sender_id,body,sent_at,request_id)
+  VALUES (8,2,1,'Newer than the current boundary',0,'fixture_group_msg');
+CREATE TRIGGER fixture_stop_v3 BEFORE UPDATE ON members
+  BEGIN SELECT RAISE(ABORT,'fixture blocked membership IDs'); END;
+`); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := openDB(path); err == nil {
+		next.Close()
+		t.Fatal("v3 migration unexpectedly succeeded")
+	} else if !strings.Contains(err.Error(), "fixture blocked membership IDs") {
+		t.Fatal(err)
+	}
+	checkDBInt(t, legacy, "PRAGMA user_version", 2)
+	checkDBInt(t, legacy, "SELECT count(*) FROM pragma_table_info('members') WHERE name='membership_id'", 0)
+	checkDBInt(t, legacy, "SELECT joined_after_message_id FROM members", 7)
+	if _, err := legacy.Exec("DROP TRIGGER fixture_stop_v3"); err != nil {
+		t.Fatal(err)
+	}
+	var firstID string
+	for range 2 {
+		db, err := openDB(path)
+		if err != nil {
+			t.Fatal(err)
+		}
+		checkDBInt(t, db, "PRAGMA user_version", 3)
+		checkDBInt(t, db, "SELECT joined_after_message_id FROM members", 7)
+		var id string
+		if err := db.QueryRow("SELECT membership_id FROM members").Scan(&id); err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Close(); err != nil {
+			t.Fatal(err)
+		}
+		if len(id) != 32 || (firstID != "" && firstID != id) {
+			t.Fatal("membership ID is missing or changed after reopening v3")
+		}
+		firstID = id
 	}
 }

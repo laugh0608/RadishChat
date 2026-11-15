@@ -16,6 +16,8 @@ var errMember = errors.New("already member")
 var errGroupFull = errors.New("group full")
 var errRequestConflict = errors.New("request conflict")
 
+const membershipHeader = "X-RadishChat-Membership"
+
 type room struct {
 	ID            int64  `json:"id"`
 	Kind          string `json:"kind"`
@@ -24,6 +26,7 @@ type room struct {
 	OwnerID       int64  `json:"ownerId,omitempty"`
 	MemberCount   int    `json:"memberCount"`
 	LastMessageID int64  `json:"lastMessageId"`
+	MembershipID  string `json:"membershipId"`
 }
 type message struct {
 	ID       int64  `json:"id"`
@@ -40,7 +43,8 @@ func (s *Server) listRooms(w http.ResponseWriter, r *http.Request, u user) {
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT r.id,r.kind,coalesce(peer.display_name,r.name),coalesce(peer.username,''),coalesce(r.owner_id,0),
 			(SELECT count(*) FROM members WHERE room_id=r.id),
-			coalesce((SELECT id FROM messages WHERE room_id=r.id AND id>m.joined_after_message_id ORDER BY id DESC LIMIT 1),0) AS last
+			coalesce((SELECT id FROM messages WHERE room_id=r.id AND id>m.joined_after_message_id ORDER BY id DESC LIMIT 1),0) AS last,
+			m.membership_id
 		FROM members m JOIN rooms r ON r.id=m.room_id
 		LEFT JOIN users peer ON peer.id=CASE WHEN r.direct_a=m.user_id THEN r.direct_b ELSE r.direct_a END
 		WHERE m.user_id=? ORDER BY last DESC,r.id DESC`, u.ID)
@@ -52,7 +56,7 @@ func (s *Server) listRooms(w http.ResponseWriter, r *http.Request, u user) {
 	result := make([]room, 0)
 	for rows.Next() {
 		var c room
-		if err := rows.Scan(&c.ID, &c.Kind, &c.Name, &c.PeerUsername, &c.OwnerID, &c.MemberCount, &c.LastMessageID); err != nil {
+		if err := rows.Scan(&c.ID, &c.Kind, &c.Name, &c.PeerUsername, &c.OwnerID, &c.MemberCount, &c.LastMessageID, &c.MembershipID); err != nil {
 			internal(w, "room-row", err)
 			return
 		}
@@ -101,7 +105,9 @@ func (s *Server) directRoom(w http.ResponseWriter, r *http.Request, u user) {
 		if err := tx.QueryRowContext(ctx, "SELECT id FROM rooms WHERE direct_a=? AND direct_b=?", a, b).Scan(&id); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO members(room_id,user_id) VALUES (?,?),(?,?) ON CONFLICT(room_id,user_id) DO NOTHING", id, a, id, b)
+		_, err = tx.ExecContext(ctx, `INSERT INTO members(room_id,user_id,membership_id)
+			VALUES (?,?,lower(hex(randomblob(16)))),(?,?,lower(hex(randomblob(16))))
+			ON CONFLICT(room_id,user_id) DO NOTHING`, id, a, id, b)
 		return err
 	})
 	if errors.Is(err, errMissing) {
@@ -153,7 +159,8 @@ func (s *Server) groupRoom(w http.ResponseWriter, r *http.Request, u user) {
 			return err
 		}
 		for _, member := range people {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO members(room_id,user_id) VALUES (?,?)", id, member); err != nil {
+			if _, err := tx.ExecContext(ctx, `INSERT INTO members(room_id,user_id,membership_id)
+				VALUES (?,?,lower(hex(randomblob(16))))`, id, member); err != nil {
 				return err
 			}
 		}
@@ -176,10 +183,11 @@ type membership struct {
 	joinedAfterMessageID int64
 }
 
-func access(ctx context.Context, tx *sql.Tx, roomID, userID int64) (membership, error) {
+func access(r *http.Request, tx *sql.Tx, roomID, userID int64) (membership, error) {
 	var member membership
-	err := tx.QueryRowContext(ctx, `SELECT coalesce(r.owner_id,0),m.joined_after_message_id FROM members m JOIN rooms r ON r.id=m.room_id
-		WHERE m.room_id=? AND m.user_id=?`, roomID, userID).Scan(&member.ownerID, &member.joinedAfterMessageID)
+	expected := r.Header.Get(membershipHeader)
+	err := tx.QueryRowContext(r.Context(), `SELECT coalesce(r.owner_id,0),m.joined_after_message_id FROM members m JOIN rooms r ON r.id=m.room_id
+		WHERE m.room_id=? AND m.user_id=? AND (?='' OR m.membership_id=?)`, roomID, userID, expected, expected).Scan(&member.ownerID, &member.joinedAfterMessageID)
 	if errors.Is(err, sql.ErrNoRows) {
 		return member, errMissing
 	}
@@ -225,7 +233,7 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request, u user) {
 	rid := intID(r.PathValue("room"))
 	list := make([]user, 0)
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		if _, err := access(ctx, tx, rid, u.ID); err != nil {
+		if _, err := access(r, tx, rid, u.ID); err != nil {
 			return err
 		}
 		rows, err := tx.QueryContext(ctx, `SELECT u.id,u.username,u.display_name FROM members m
@@ -261,7 +269,7 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request, u user) {
 	rid := intID(r.PathValue("room"))
 	var people []int64
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		current, err := access(ctx, tx, rid, u.ID)
+		current, err := access(r, tx, rid, u.ID)
 		if err != nil {
 			return err
 		}
@@ -284,8 +292,8 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request, u user) {
 		if len(people) >= 50 {
 			return errGroupFull
 		}
-		_, err = tx.ExecContext(ctx, `INSERT INTO members(room_id,user_id,joined_after_message_id)
-			SELECT ?,?,coalesce(max(id),0) FROM messages WHERE room_id=?`, rid, member, rid)
+		_, err = tx.ExecContext(ctx, `INSERT INTO members(room_id,user_id,joined_after_message_id,membership_id)
+			SELECT ?,?,coalesce(max(id),0),lower(hex(randomblob(16))) FROM messages WHERE room_id=?`, rid, member, rid)
 		people = append(people, member)
 		return err
 	})
@@ -302,7 +310,7 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request, u user) {
 	rid, member := intID(r.PathValue("room")), intID(r.PathValue("member"))
 	var people []int64
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		current, err := access(ctx, tx, rid, u.ID)
+		current, err := access(r, tx, rid, u.ID)
 		if err != nil {
 			return err
 		}
@@ -344,7 +352,7 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request, u user) {
 	}
 	out := messagePage{Messages: make([]message, 0)}
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		current, err := access(ctx, tx, rid, u.ID)
+		current, err := access(r, tx, rid, u.ID)
 		if err != nil {
 			return err
 		}
@@ -406,7 +414,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, u user) {
 	m := message{Author: u, Markdown: input.Markdown, SentAt: time.Now().UnixMilli()}
 	var people []int64
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		current, err := access(ctx, tx, rid, u.ID)
+		current, err := access(r, tx, rid, u.ID)
 		if err != nil {
 			return err
 		}
@@ -449,7 +457,7 @@ func (s *Server) leaveGroup(w http.ResponseWriter, r *http.Request, u user) {
 	rid := intID(r.PathValue("room"))
 	var people []int64
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		current, err := access(ctx, tx, rid, u.ID)
+		current, err := access(r, tx, rid, u.ID)
 		if err != nil {
 			return err
 		}

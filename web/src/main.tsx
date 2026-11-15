@@ -130,22 +130,40 @@ function NewRoom({kind, onCancel, onOpen}: {kind: Room['kind']; onCancel: () => 
   </form>;
 }
 
-function Members({room, me, version, onChange}: {room: Room; me: Account; version: number; onChange: () => void}) {
+function Members({room, me, version, getRoomSignal, onChange, onAccessLost}: {
+  room: Room; me: Account; version: number; getRoomSignal: () => AbortSignal | undefined; onChange: () => void; onAccessLost: () => void;
+}) {
   const [members, setMembers] = useState<Account[]>([]);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const canEdit = room.ownerId === me.id;
   useEffect(() => {
     const controller = new AbortController();
-    api<Account[]>(`/rooms/${room.id}/members`, 'GET', undefined, controller.signal)
-      .then(setMembers).catch((err) => { if (!controller.signal.aborted) setError(errorText(err)); });
+    const signal = getRoomSignal();
+    api<Account[]>(`/rooms/${room.id}/members`, 'GET', undefined, controller.signal, room.membershipId)
+      .then(result => { if (!controller.signal.aborted && !signal?.aborted) setMembers(result); })
+      .catch(err => {
+        if (controller.signal.aborted || signal?.aborted) return;
+        if (err instanceof RequestError && err.status === 404) onAccessLost();
+        else setError(errorText(err));
+      });
     return () => controller.abort();
-  }, [room.id, version]);
-  async function change(path: string, method: string, data?: unknown) {
+  }, [room.id, room.membershipId, version]);
+  async function change(path: string, method: string, data?: unknown, didChange = onChange) {
+    const signal = getRoomSignal();
     setBusy(true);setError('');
-    try {await api(path, method, data);onChange();return true;}
-    catch (err) {setError(errorText(err));return false;}
-    finally {setBusy(false);}
+    try {
+      await api(path, method, data, signal, room.membershipId);
+      if (signal?.aborted) return false;
+      didChange();
+      return true;
+    } catch (err) {
+      if (!signal?.aborted) {
+        if (err instanceof RequestError && err.status === 404) onChange();
+        setError(errorText(err));
+      }
+      return false;
+    } finally { if (!signal?.aborted) setBusy(false); }
   }
   return <aside className="members" aria-label="群成员">
     <ul>{members.map((m) => <li key={m.id}><span><strong>{m.displayName}</strong><small>@{m.username}{room.ownerId === m.id && ' · 群主'}</small></span>
@@ -154,12 +172,14 @@ function Members({room, me, version, onChange}: {room: Room; me: Account; versio
       e.preventDefault();const form = e.currentTarget;
       if (await change(`/rooms/${room.id}/members`, 'POST', {username: new FormData(form).get('member')})) form.reset();
     }}><label>添加成员<input name="member" placeholder="完整用户名" required maxLength={32} /></label><button className="secondary" disabled={busy}>添加</button></form>}
-    {!canEdit && <button type="button" className="secondary" disabled={busy} onClick={() => void change(`/rooms/${room.id}/leave`, 'POST')}>退出群组</button>}
+    {!canEdit && <button type="button" className="secondary" disabled={busy} onClick={() => void change(`/rooms/${room.id}/leave`, 'POST', undefined, onAccessLost)}>退出群组</button>}
     {error && <p role="alert" className="error">{error}</p>}
   </aside>;
 }
 
-function Conversation({me, room, version, onChange, onBack}: {me: Account; room: Room; version: number; onChange: () => void; onBack: () => void}) {
+function Conversation({me, room, version, onChange, onBack, onAccessLost}: {
+  me: Account; room: Room; version: number; onChange: () => void; onBack: () => void; onAccessLost: () => void;
+}) {
   const [messages, setMessages] = useState<Message[]>([]);
   const [more, setMore] = useState(false);
   const [loaded, setLoaded] = useState(false);
@@ -177,8 +197,7 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
   // null 表示尚未读取，0 表示已经确认没有可见消息。
   const newest = useRef<number | null>(null);
   const oldest = useRef<number | null>(null);
-  const historyGeneration = useRef(0);
-  const paging = useRef<{signal: AbortSignal; refresh: () => Promise<void>} | null>(null);
+  const paging = useRef<{controller: AbortController; refresh: () => Promise<void>} | null>(null);
   const pinBottom = useRef(true);
   const preserve = useRef(0);
 
@@ -189,15 +208,13 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
 
   function showReadError(err: unknown) {
     if (err instanceof RequestError && err.status === 404) {
-      historyGeneration.current++;
-      newest.current = null;
-      oldest.current = null;
-      preserve.current = 0;
-      setMessages([]);
-      setMore(false);
-      setLoaded(false);
-    }
-    setNotice(errorText(err));
+      loseAccess();
+    } else setNotice(errorText(err));
+  }
+
+  function loseAccess() {
+    paging.current?.controller.abort();
+    onAccessLost();
   }
 
   useEffect(() => {
@@ -208,13 +225,12 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
     let pending = false;
 
     async function readForward() {
-      const generation = historyGeneration.current;
       try {
         let moreAhead = false;
         do {
           const after = newest.current;
-          const result = await api<Page>(after === null ? path : `${path}?after=${after}`, 'GET', undefined, signal);
-          if (signal.aborted || generation !== historyGeneration.current) return;
+          const result = await api<Page>(after === null ? path : `${path}?after=${after}`, 'GET', undefined, signal, room.membershipId);
+          if (signal.aborted) return;
           if (after === null) {
             oldest.current = result.messages[0]?.id ?? null;
             setMore(result.more);
@@ -226,7 +242,7 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
           moreAhead = after !== null && result.more && result.messages.length > 0;
         } while (moreAhead);
       } catch (err) {
-        if (!signal.aborted && generation === historyGeneration.current) showReadError(err);
+        if (!signal.aborted) showReadError(err);
       }
     }
 
@@ -244,15 +260,15 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
       }
     }
 
-    paging.current = {signal, refresh};
+    paging.current = {controller, refresh};
     return () => {
       controller.abort();
       paging.current = null;
     };
-  }, [room.id]);
+  }, [room.id, room.membershipId]);
   useEffect(() => {
     void paging.current?.refresh();
-  }, [room.id, version]);
+  }, [room.id, room.membershipId, version]);
   useEffect(() => {
     if (!feed.current) return;
     if (preserve.current) {
@@ -263,37 +279,44 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
 
   async function older() {
     const before = oldest.current;
-    const signal = paging.current?.signal;
-    if (earlier || before === null || !signal) return;
-    const generation = historyGeneration.current;
+    const signal = paging.current?.controller.signal;
+    if (earlier || before === null || !signal || signal.aborted) return;
     setEarlier(true);
     try {
-      const result = await api<Page>(`/rooms/${room.id}/messages?before=${before}`, 'GET', undefined, signal);
-      if (signal.aborted || generation !== historyGeneration.current) return;
+      const result = await api<Page>(`/rooms/${room.id}/messages?before=${before}`, 'GET', undefined, signal, room.membershipId);
+      if (signal.aborted) return;
       oldest.current = result.messages[0]?.id ?? before;
       if (result.messages.length > 0) preserve.current = feed.current?.scrollHeight || 0;
       setMore(result.more);
       merge(result.messages);
       setNotice('');
     } catch (err) {
-      if (!signal.aborted && generation === historyGeneration.current) showReadError(err);
+      if (!signal.aborted) showReadError(err);
     } finally {
       if (!signal.aborted) setEarlier(false);
     }
   }
   async function send(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
-    if (sending || tooLong || !text.trim()) return;
+    const signal = paging.current?.controller.signal;
+    if (sending || tooLong || !text.trim() || !signal || signal.aborted) return;
     if (request.current?.body !== text) request.current = {body: text, id: crypto.randomUUID()};
     setSending(true); setSendError('');
     try {
-      const sent = await api<Message>(`/rooms/${room.id}/messages`, 'POST', {markdown: text, requestId: request.current.id});
+      const sent = await api<Message>(`/rooms/${room.id}/messages`, 'POST', {markdown: text, requestId: request.current.id}, signal, room.membershipId);
+      if (signal.aborted) return;
       pinBottom.current = true;
       // 先让已有增量补拉使用原游标，以免跳过比本次发送更早的对端消息。
       merge([sent]);
       request.current = null; setText('');setPreview(false);onChange();
-    } catch (err) {setSendError(errorText(err));}
-    finally {setSending(false);}
+    } catch (err) {
+      if (signal.aborted) return;
+      if (err instanceof RequestError && err.status === 404) loseAccess();
+      else {
+        if (err instanceof RequestError && err.status === 409) request.current = null;
+        setSendError(errorText(err));
+      }
+    } finally { if (!signal.aborted) setSending(false); }
   }
   return <section className="conversation">
     <header className="conversation-header">
@@ -303,7 +326,7 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
       {room.kind === 'group' && <button type="button" className="secondary" aria-expanded={members} onClick={() => setMembers(!members)}>成员</button>}
     </header>
     <p className="conversation-privacy">普通会话 · 消息正文由服务器处理并保存，拥有数据库或备份访问权限的人可以读取。</p>
-    {members && <Members room={room} me={me} version={version} onChange={onChange} />}
+    {members && <Members room={room} me={me} version={version} getRoomSignal={() => paging.current?.controller.signal} onChange={onChange} onAccessLost={loseAccess} />}
     <div className="message-feed" ref={feed} aria-label="聊天记录" onScroll={(e) => {
       const el = e.currentTarget;
       pinBottom.current = el.scrollHeight - el.scrollTop - el.clientHeight < 96;
@@ -320,21 +343,25 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
       <div className="compose-label"><label htmlFor="message">消息 <small>支持 Markdown</small></label>
         <button type="button" className="text-button" aria-pressed={preview} onClick={() => setPreview(!preview)}>{preview ? '返回编辑' : '预览'}</button></div>
       {preview && <div className="markdown preview" aria-label="消息预览">{text.trim() ? <MessageBody body={text}/> : '还没有内容'}</div>}
-      <textarea hidden={preview} id="message" placeholder="写点什么…" value={text} disabled={sending} onChange={(e) => setText(e.target.value)}
+      <textarea hidden={preview} id="message" placeholder="写点什么…" value={text} disabled={sending} onChange={(e) => {setText(e.target.value);setSendError('');}}
         onKeyDown={e => {if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.nativeEvent.isComposing) {e.preventDefault();e.currentTarget.form?.requestSubmit();}}}/>
       <div className="compose-actions">{composerError && <span className="error" role="alert">{composerError}</span>}
-        <button className="primary" disabled={sending || tooLong || !text.trim()}>发送</button></div>
+        <button className="primary" disabled={sending || tooLong || !text.trim()}>{sending ? '发送中…' : sendError ? '重试发送' : '发送'}</button></div>
     </form>
   </section>;
 }
 
+type RoomSelection = {id: number; membershipId: string | null};
+
 function Workspace({me, onLogout}: {me: Account; onLogout: () => void}) {
-  const [rooms, setRooms] = useState<Room[]>([]);
-  const [selected, setSelected] = useState<number>();
+  const [{rooms, selected, roomNotice}, setRoomsView] = useState<{
+    rooms: Room[]; selected?: RoomSelection; roomNotice?: string;
+  }>({rooms: []});
   const [create, setCreate] = useState<Room['kind']>();
   const [version, setVersion] = useState(0);
   const [network, setNetwork] = useState('正在连接');
   const [error, setError] = useState('');
+  const roomsRequest = useRef<AbortController | null>(null);
   const notify = () => setVersion(v => v + 1);
   const logoutRef = useRef(onLogout);
   logoutRef.current = onLogout;
@@ -369,8 +396,20 @@ function Workspace({me, onLogout}: {me: Account; onLogout: () => void}) {
   }, []);
   useEffect(() => {
     const controller = new AbortController();
+    roomsRequest.current = controller;
     api<Room[]>('/rooms', 'GET', undefined, controller.signal)
-      .then(result => { if (!controller.signal.aborted) {setRooms(result);setError('');} })
+      .then(result => {
+        if (controller.signal.aborted) return;
+        setRoomsView(view => {
+          const next = result.find(room => room.id === view.selected?.id);
+          if (next) return {rooms: result, selected: {id: next.id, membershipId: next.membershipId}};
+          if (view.selected && view.selected.membershipId !== null) {
+            return {rooms: result, roomNotice: '此会话已不可访问'};
+          }
+          return {...view, rooms: result};
+        });
+        setError('');
+      })
       .catch(err => {
         if (controller.signal.aborted) return;
         if (err instanceof RequestError && err.status === 401) logoutRef.current();
@@ -378,23 +417,38 @@ function Workspace({me, onLogout}: {me: Account; onLogout: () => void}) {
       });
     return () => controller.abort();
   }, [version]);
-  const current = rooms.find(r => r.id === selected);
+  function selectRoom(selection?: RoomSelection) {
+    setRoomsView(view => ({rooms: view.rooms, selected: selection}));
+  }
+  function loseRoom(room: Room) {
+    roomsRequest.current?.abort();
+    setRoomsView(view => {
+      const rooms = view.rooms.filter(candidate => candidate.id !== room.id || candidate.membershipId !== room.membershipId);
+      if (view.selected?.id === room.id && view.selected.membershipId === room.membershipId) {
+        return {rooms, roomNotice: '此会话已不可访问'};
+      }
+      return {...view, rooms};
+    });
+    notify();
+  }
+  const current = rooms.find(r => r.id === selected?.id);
   return <main className={`workspace${current ? ' has-room' : ''}`}>
     <aside className="rail">
       <div className="rail-top"><Brand /><div className="status-line"><span className={`dot ${network === '已连接' ? 'online' : ''}`}/>{network}<span className="host">{window.location.host}</span></div></div>
       <div className="rail-controls"><h1>会话</h1><div className="row"><button className="secondary" type="button" onClick={() => setCreate('direct')}>新私聊</button><button className="secondary" type="button" onClick={() => setCreate('group')}>建群组</button></div></div>
-      {create && <NewRoom key={create} kind={create} onCancel={() => setCreate(undefined)} onOpen={id => {setSelected(id);setCreate(undefined);notify();}} />}
+      {create && <NewRoom key={create} kind={create} onCancel={() => setCreate(undefined)} onOpen={id => {selectRoom({id, membershipId: null});setCreate(undefined);notify();}} />}
       {error && <p role="alert" className="error rail-error">{error}</p>}
+      {roomNotice && <p role="status" className="subtle rail-error">{roomNotice}</p>}
       <nav aria-label="会话列表" className="room-list">
         {rooms.length === 0 && <p className="subtle">还没有会话。从一个熟悉的用户名开始。</p>}
-        {rooms.map(r => <button type="button" key={r.id} className={r.id === selected ? 'room active' : 'room'} aria-current={r.id === selected ? 'true' : undefined} onClick={() => {setSelected(r.id);setCreate(undefined);}}>
+        {rooms.map(r => <button type="button" key={r.id} className={r.id === selected?.id ? 'room active' : 'room'} aria-current={r.id === selected?.id ? 'true' : undefined} onClick={() => {selectRoom({id: r.id, membershipId: r.membershipId});setCreate(undefined);}}>
           <span className="avatar" aria-hidden="true">{first(r.name)}</span><span className="room-text"><strong>{r.name}</strong><small>{r.kind === 'group' ? `群组 · ${r.memberCount} 人` : `@${r.peerUsername}`}</small></span>
         </button>)}
       </nav>
       <footer className="rail-foot"><div className="account-line"><div className="avatar" aria-hidden="true">{first(me.displayName)}</div><div className="grow"><strong>{me.displayName}</strong><small>@{me.username}</small></div>
         <button type="button" className="text-button" onClick={async () => {try {await api('/logout', 'POST');onLogout();} catch (err) {setError(errorText(err));}}}>退出</button></div><ServerPicker /></footer>
     </aside>
-    {current ? <Conversation key={current.id} room={current} me={me} version={version} onChange={notify} onBack={() => setSelected(undefined)} /> :
+    {current ? <Conversation key={current.id + ':' + current.membershipId} room={current} me={me} version={version} onChange={notify} onBack={() => selectRoom()} onAccessLost={() => loseRoom(current)} /> :
       <section className="welcome"><span className="eyebrow">RADISHCHAT WORKSPACE</span><h2>今天聊点什么？</h2><p>打开一个会话，或用对方在这个服务器上的用户名发起私聊。</p></section>}
   </main>;
 }

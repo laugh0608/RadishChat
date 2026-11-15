@@ -77,6 +77,12 @@ UPDATE members SET joined_after_message_id = coalesce(
 PRAGMA user_version = 2;
 `
 
+const migrateV2ToV3 = `
+ALTER TABLE members ADD COLUMN membership_id TEXT NOT NULL DEFAULT '';
+UPDATE members SET membership_id = lower(hex(randomblob(16)));
+PRAGMA user_version = 3;
+`
+
 func openDB(path string) (*sql.DB, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -119,8 +125,13 @@ func openDB(path string) (*sql.DB, error) {
 			if _, err := tx.ExecContext(ctx, migrateV1ToV2); err != nil {
 				return fmt.Errorf("SQLite 从 v1 迁移到 v2 失败: %w", err)
 			}
-			return nil
+			fallthrough
 		case 2:
+			if _, err := tx.ExecContext(ctx, migrateV2ToV3); err != nil {
+				return fmt.Errorf("SQLite 从 v2 迁移到 v3 失败: %w", err)
+			}
+			return nil
+		case 3:
 			return nil
 		default:
 			return fmt.Errorf("未支持的数据库版本 %d", version)

@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"net/http"
 	"slices"
+	"strings"
 	"testing"
 )
 
@@ -48,6 +49,63 @@ func TestConcurrentDirectRoom(t *testing.T) {
 	call(t, a, i.host.URL, "POST", path+"/members", map[string]string{"username": "bob"}, http.StatusForbidden)
 	call(t, a, i.host.URL, "DELETE", fmt.Sprintf("%s/members/%d", path, bob.ID), nil, http.StatusForbidden)
 	call(t, b, i.host.URL, "POST", path+"/leave", nil, http.StatusForbidden)
+}
+
+func TestRoomRequestsRequireMatchingMembershipWhenSpecified(t *testing.T) {
+	i := newInstance(t, Config{Registration: RegistrationOpen})
+	a, _ := addUser(t, i.host.URL, "alice")
+	b, bob := addUser(t, i.host.URL, "bob")
+	origin := i.host.URL
+	var group struct{ ID int64 }
+	call(t, a, origin, "POST", "/rooms/group", map[string]any{"name": "成员资格", "usernames": []string{"bob"}}, http.StatusCreated, &group)
+	path := fmt.Sprintf("/rooms/%d", group.ID)
+	listID := func() string {
+		t.Helper()
+		var rooms []room
+		call(t, b, origin, "GET", "/rooms", nil, http.StatusOK, &rooms)
+		if len(rooms) != 1 || rooms[0].LastMessageID != 0 || rooms[0].MembershipID == "" {
+			t.Fatalf("expected one empty room with a membership ID: %+v", rooms)
+		}
+		return rooms[0].MembershipID
+	}
+	first := listID()
+	call(t, a, origin, "DELETE", fmt.Sprintf("%s/members/%d", path, bob.ID), nil, http.StatusNoContent)
+	call(t, a, origin, "POST", path+"/members", map[string]string{"username": "bob"}, http.StatusNoContent)
+	current := listID()
+	if first == current {
+		t.Fatal("rejoining with the same message boundary reused the old membership ID")
+	}
+
+	request := func(method, suffix, body, membershipID string, want int) {
+		t.Helper()
+		req, err := http.NewRequest(method, origin+"/api/v1"+path+suffix, strings.NewReader(body))
+		if err != nil {
+			t.Fatal(err)
+		}
+		req.Header.Set("Origin", origin)
+		req.Header.Set("Content-Type", "application/json")
+		req.Header.Set(membershipHeader, membershipID)
+		res, err := b.Do(req)
+		if err != nil {
+			t.Fatal(err)
+		}
+		res.Body.Close()
+		if res.StatusCode != want {
+			t.Fatalf("%s %s: got %d, want %d", method, suffix, res.StatusCode, want)
+		}
+	}
+	body := `{"markdown":"新成员资格消息","requestId":"fixture_membership_req"}`
+	request("GET", "/members", "", first, http.StatusNotFound)
+	request("GET", "/messages?after=0", "", first, http.StatusNotFound)
+	request("POST", "/messages", body, first, http.StatusNotFound)
+	request("POST", "/leave", "", first, http.StatusNotFound)
+	request("GET", "/members", "", current, http.StatusOK)
+	request("POST", "/messages", body, current, http.StatusCreated)
+	var page messagePage
+	call(t, b, origin, "GET", path+"/messages", nil, http.StatusOK, &page)
+	if len(page.Messages) != 1 || page.Messages[0].Markdown != "新成员资格消息" {
+		t.Fatalf("unexpected history through the existing API: %+v", page)
+	}
 }
 
 func TestGroupMembershipPermissions(t *testing.T) {
