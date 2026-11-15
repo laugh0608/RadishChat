@@ -13,8 +13,9 @@ import (
 )
 
 const (
-	botSchemaVersion     = 4
-	currentSchemaVersion = botSchemaVersion
+	botSchemaVersion             = 4
+	botInstallationSchemaVersion = 5
+	currentSchemaVersion         = botInstallationSchemaVersion
 )
 
 const schemaV1 = `
@@ -99,6 +100,20 @@ CREATE INDEX bots_owner ON bots(owner_id, id);
 PRAGMA user_version = 4;
 `
 
+const migrateV4ToV5 = `
+CREATE TABLE bot_installations (
+  id TEXT PRIMARY KEY NOT NULL,
+  room_id INTEGER NOT NULL REFERENCES rooms(id) ON DELETE CASCADE,
+  bot_id TEXT NOT NULL REFERENCES bots(id) ON DELETE CASCADE,
+  requested_by INTEGER NOT NULL REFERENCES users(id),
+  state TEXT NOT NULL CHECK (state IN ('pending','active')),
+  permission TEXT NOT NULL CHECK (permission = 'installation:read'),
+  UNIQUE (room_id, bot_id)
+);
+CREATE INDEX bot_installations_bot ON bot_installations(bot_id, room_id);
+PRAGMA user_version = 5;
+`
+
 func openDB(path string) (*sql.DB, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -143,6 +158,11 @@ func openDB(path string) (*sql.DB, error) {
 		case 3:
 			if _, err := tx.ExecContext(ctx, migrateV3ToV4); err != nil {
 				return fmt.Errorf("SQLite 从 v3 迁移到 v4 失败: %w", err)
+			}
+			fallthrough
+		case 4:
+			if _, err := tx.ExecContext(ctx, migrateV4ToV5); err != nil {
+				return fmt.Errorf("SQLite 从 v4 迁移到 v5 失败: %w", err)
 			}
 			return nil
 		case currentSchemaVersion:

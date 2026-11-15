@@ -172,3 +172,46 @@ CREATE INDEX bots_owner ON users(display_name);
 	checkDBInt(t, db, "SELECT count(*) FROM bots", 0)
 	checkDBInt(t, db, "SELECT count(*) FROM users WHERE username='alice'", 1)
 }
+
+func TestMigrateV4PreservesBotCredentialAndRollsBackInstallationDDL(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chat.sqlite")
+	legacy, err := sqliteDatabase(path, "rwc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacy.Close()
+	if _, err := legacy.Exec(schemaV1 + migrateV1ToV2 + migrateV2ToV3 + migrateV3ToV4 + `
+INSERT INTO users(id,username,display_name) VALUES (1,'alice','Alice');
+INSERT INTO rooms(id,kind,name,owner_id) VALUES (1,'group','Fixture',1);
+INSERT INTO members(room_id,user_id,joined_after_message_id,membership_id) VALUES (1,1,7,'fixture-v4-membership');
+INSERT INTO messages(id,room_id,sender_id,body,sent_at,request_id) VALUES (7,1,1,'Fixture',0,'fixture-v4-message');
+CREATE INDEX bot_installations_bot ON bots(display_name);
+`); err != nil {
+		t.Fatal(err)
+	}
+	token := botTokenPrefix + randomText(botTokenBytes)
+	if _, err := legacy.Exec("INSERT INTO bots(id,owner_id,display_name,token_hash) VALUES ('fixture',1,'Fixture Bot',?)", digest(token)); err != nil {
+		t.Fatal(err)
+	}
+
+	if next, err := openDB(path); err == nil {
+		next.Close()
+		t.Fatal("v5 migration unexpectedly succeeded")
+	} else if !strings.Contains(err.Error(), "SQLite 从 v4 迁移到 v5 失败") {
+		t.Fatal(err)
+	}
+	checkDBInt(t, legacy, "PRAGMA user_version", 4)
+	checkDBInt(t, legacy, "SELECT count(*) FROM sqlite_schema WHERE name='bot_installations'", 0)
+	checkDBInt(t, legacy, "SELECT count(*) FROM bots WHERE token_hash IS NOT NULL", 1)
+	if _, err := legacy.Exec("DROP INDEX bot_installations_bot"); err != nil {
+		t.Fatal(err)
+	}
+
+	opened := newInstance(t, Config{Database: path})
+	checkDBInt(t, opened.s.db, "PRAGMA user_version", currentSchemaVersion)
+	checkDBInt(t, opened.s.db, "SELECT count(*) FROM bot_installations", 0)
+	checkDBInt(t, opened.s.db, "SELECT joined_after_message_id FROM members WHERE membership_id='fixture-v4-membership'", 7)
+	checkDBInt(t, opened.s.db, "SELECT count(*) FROM messages WHERE id=7", 1)
+	checkBotToken(t, opened.host.URL, token, 200, nil)
+	testBotRoomAccess(t, opened.host.URL, token, 1, "", 404)
+}

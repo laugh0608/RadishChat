@@ -1,6 +1,7 @@
 package chat
 
 import (
+	"context"
 	"database/sql"
 	"encoding/base64"
 	"errors"
@@ -12,6 +13,8 @@ const (
 	botTokenPrefix = "bot_"
 	botTokenBytes  = 32
 )
+
+var errBotCredential = errors.New("invalid Bot credential")
 
 type bot struct {
 	ID          string `json:"id"`
@@ -106,26 +109,43 @@ func botToken(r *http.Request) string {
 	return value
 }
 
-func (s *Server) botMe(w http.ResponseWriter, r *http.Request) {
+// Bot authentication can run inside the same transaction as an installation check.
+type botIdentityReader interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
+}
+
+func botIdentity(r *http.Request, db botIdentityReader) (bot, error) {
+	var record bot
 	token := botToken(r)
 	if token == "" {
-		rejectBotCredential(w)
-		return
+		return record, errBotCredential
 	}
-	var record bot
-	err := s.db.QueryRowContext(r.Context(), `SELECT id,display_name FROM bots WHERE token_hash=?`, digest(token)).Scan(&record.ID, &record.DisplayName)
+	err := db.QueryRowContext(r.Context(), `SELECT id,display_name FROM bots WHERE token_hash=?`, digest(token)).Scan(&record.ID, &record.DisplayName)
 	if errors.Is(err, sql.ErrNoRows) {
-		rejectBotCredential(w)
-		return
+		return record, errBotCredential
 	}
+	return record, err
+}
+
+func (s *Server) botMe(w http.ResponseWriter, r *http.Request) {
+	record, err := botIdentity(r, s.db)
 	if err != nil {
-		internal(w, "bot-identity", err)
+		botError(w, "bot-identity", err)
 		return
 	}
 	reply(w, http.StatusOK, record)
 }
 
-func rejectBotCredential(w http.ResponseWriter) {
-	w.Header().Set("WWW-Authenticate", `Bearer realm="RadishChat Bot"`)
-	fail(w, http.StatusUnauthorized, "Bot 凭据无效或缺失")
+func botError(w http.ResponseWriter, operation string, err error) {
+	switch {
+	case errors.Is(err, errBotCredential):
+		w.Header().Set("WWW-Authenticate", `Bearer realm="RadishChat Bot"`)
+		fail(w, http.StatusUnauthorized, "Bot 凭据无效或缺失")
+	case errors.Is(err, errMissing), errors.Is(err, sql.ErrNoRows):
+		fail(w, http.StatusNotFound, "Bot、群组或安装授权不存在")
+	case errors.Is(err, errOwner):
+		fail(w, http.StatusForbidden, "没有管理此 Bot 安装的权限")
+	default:
+		internal(w, operation, err)
+	}
 }
