@@ -36,7 +36,7 @@ function ServerPicker() {
   </div>;
 }
 
-function Access({info, onLogin}: {info: Info; onLogin: (a: Account) => void}) {
+function Access({info, onLogin, onInfo}: {info: Info; onLogin: (a: Account) => void; onInfo: (info: Info) => void}) {
   const [register, setRegister] = useState(false);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState(() => {
@@ -49,7 +49,16 @@ function Access({info, onLogin}: {info: Info; onLogin: (a: Account) => void}) {
     const values = Object.fromEntries(new FormData(e.currentTarget));
     setBusy(true); setError('');
     try { onLogin(await api<Account>(register ? '/register' : '/login', 'POST', values)); }
-    catch (err) { setError(errorText(err)); }
+    catch (err) {
+      setError(errorText(err));
+      if (register && err instanceof RequestError && err.status === 403) {
+        const current = await api<Info>('/info').catch(() => null);
+        if (current) {
+          onInfo(current);
+          if (!current.registration) setRegister(false);
+        }
+      }
+    }
     finally { setBusy(false); }
   }
   async function radishLogin() {
@@ -293,6 +302,7 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
       <div className="grow"><h1>{room.name}</h1><p>{room.kind === 'direct' ? `私聊 · @${room.peerUsername}` : `群组 · ${room.memberCount} 位成员`}</p></div>
       {room.kind === 'group' && <button type="button" className="secondary" aria-expanded={members} onClick={() => setMembers(!members)}>成员</button>}
     </header>
+    <p className="conversation-privacy">普通会话 · 消息正文由服务器处理并保存，拥有数据库或备份访问权限的人可以读取。</p>
     {members && <Members room={room} me={me} version={version} onChange={onChange} />}
     <div className="message-feed" ref={feed} aria-label="聊天记录" onScroll={(e) => {
       const el = e.currentTarget;
@@ -312,7 +322,7 @@ function Conversation({me, room, version, onChange, onBack}: {me: Account; room:
       {preview && <div className="markdown preview" aria-label="消息预览">{text.trim() ? <MessageBody body={text}/> : '还没有内容'}</div>}
       <textarea hidden={preview} id="message" placeholder="写点什么…" value={text} disabled={sending} onChange={(e) => setText(e.target.value)}
         onKeyDown={e => {if ((e.ctrlKey || e.metaKey) && e.key === 'Enter' && !e.nativeEvent.isComposing) {e.preventDefault();e.currentTarget.form?.requestSubmit();}}}/>
-      <div className="compose-actions"><span className={composerError ? 'error' : 'subtle'} role={composerError ? 'alert' : undefined}>{composerError || '此会话未启用端到端加密'}</span>
+      <div className="compose-actions">{composerError && <span className="error" role="alert">{composerError}</span>}
         <button className="primary" disabled={sending || tooLong || !text.trim()}>发送</button></div>
     </form>
   </section>;
@@ -393,6 +403,7 @@ function App() {
   const [info, setInfo] = useState<Info>();
   const [account, setAccount] = useState<Account | null>(null);
   const [error, setError] = useState('');
+  const [accessVersion, setAccessVersion] = useState(0);
   useEffect(() => {
     const controller = new AbortController();
     Promise.all([
@@ -404,9 +415,15 @@ function App() {
     ]).then(([current, user]) => { if (!controller.signal.aborted) {setAccount(user);setInfo(current);} })
       .catch(err => { if (!controller.signal.aborted) setError(errorText(err)); });
     return () => controller.abort();
-  }, []);
+  }, [accessVersion]);
+  function returnToAccess() {
+    setAccount(null);
+    setInfo(undefined);
+    setError('');
+    setAccessVersion(version => version + 1);
+  }
   if (!info) return <main className="initial"><Brand /><p role={error ? 'alert' : 'status'}>{error || '正在连接服务器…'}</p>{error && <button className="secondary" onClick={() => window.location.reload()}>重试</button>}</main>;
-  return account ? <Workspace key={account.id} me={account} onLogout={() => setAccount(null)} /> : <Access info={info} onLogin={setAccount} />;
+  return account ? <Workspace key={account.id} me={account} onLogout={returnToAccess} /> : <Access info={info} onLogin={setAccount} onInfo={setInfo} />;
 }
 
 createRoot(document.getElementById('root')!).render(<StrictMode><App /></StrictMode>);

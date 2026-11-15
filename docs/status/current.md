@@ -6,9 +6,11 @@
 
 群成员本次加入边界和 SQLite v2 迁移已联合通过验收。消息确认与重试、Markdown 正文与渲染、分页与补拉已通过单项验收。[迁移与历史授权记录](../records/2026-11-15-membership-sqlite-v2.md) · [消息确认与 Markdown 验收](../records/2026-11-15-message-confirmation-markdown.md) · [分页与补拉验收](../records/2026-11-15-message-paging-sync.md)
 
+Web 本地准入与聊天主路径已通过单项验收。[桌面与窄屏 Web 验收](../records/2026-11-15-web-local-chat.md)
+
 | 顺序 | 当前事项 | 出口 |
 | --- | --- | --- |
-| 1 | 按[首批开工顺序](../planning/first-web-slice.md#p1-start-order)接续 [Web 本地准入与聊天主路径](../topics/clients.md#web-01-01)，随后复验[发送恢复、撤权和重新加入](../topics/clients.md#web-01-02)。[CI 产品检查](../topics/foundation.md#base-03-02)可独立安排 | 在桌面和窄屏验证本地登录、聊天和相关隐私提示，并核对失败与权限变更后的页面恢复 |
+| 1 | 按[首批开工顺序](../planning/first-web-slice.md#p1-start-order)接续 [Web 发送恢复、撤权和重新加入](../topics/clients.md#web-01-02)。[CI 产品检查](../topics/foundation.md#base-03-02)可独立安排 | 核对发送失败、断线、成员权限变更和重新加入后的页面恢复 |
 
 真实 Radish 登录的独立验收延期。等 Radish 侧有稳定实例且具备测试发行方、独立客户端、受控测试身份与 HTTPS 回调后，再按 [AUTH-02](../topics/identity.md#auth-02)安排。P1 使用本地账号放行。
 
