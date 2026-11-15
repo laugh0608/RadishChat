@@ -60,7 +60,7 @@ docker run --rm -i --network none --volumes-from "$target_container" \
 recovery_compose up -d --no-build --wait
 ```
 
-只在 `restore` 成功后启动新实例。确认旧会话访问 `/api/v1/me` 返回 401，然后重新登录，核对账号、群成员和历史消息。使用 Bot 的实例还应确认旧凭据访问 `/api/v1/bot/me` 返回 401，重新签发后只能访问重新授权的群。将确认通过的实例接回反代入口。备份保存在长期受保护的存储中，按实例的数据留存要求管理。[Bot Web 操作](../docs/topics/bots.md#bot-01-web)
+只在 `restore` 成功后启动新实例。确认旧会话访问 `/api/v1/me` 返回 401，然后重新登录，核对账号、群成员和历史消息。使用 Bot 的实例还应核对历史回复仍显示原作者，确认旧凭据访问 `/api/v1/bot/me` 返回 401。重新签发并安装后，Bot 使用新安装的游标读取后续命令。将确认通过的实例接回反代入口。备份保存在长期受保护的存储中，按实例的数据留存要求管理。[Bot Web 操作](../docs/topics/bots.md#bot-01-web)
 
 ## 双实例验收
 
