@@ -10,6 +10,7 @@
 *.sqlite-wal
 *.sqlite-shm
 .DS_Store
+/.idea/
 /.playwright-cli/
 /coverage/
 /web/coverage/
