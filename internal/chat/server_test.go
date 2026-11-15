@@ -136,7 +136,7 @@ func readSync(t *testing.T, r *bufio.Reader) {
 }
 
 func TestRoomsRealtimeAndPermissions(t *testing.T) {
-	i := newInstance(t, Config{})
+	i := newInstance(t, Config{AllowRegistration: true})
 	a, alice := addUser(t, i.host.URL, "alice")
 	b, bob := addUser(t, i.host.URL, "bob")
 	c, _ := addUser(t, i.host.URL, "carol")
@@ -191,7 +191,7 @@ func TestRoomsRealtimeAndPermissions(t *testing.T) {
 }
 
 func TestDataPersistsAndInstanceOrigin(t *testing.T) {
-	i := newInstance(t, Config{})
+	i := newInstance(t, Config{AllowRegistration: true})
 	c, _ := addUser(t, i.host.URL, "alice")
 	var result map[string]int64
 	call(t, c, i.host.URL, "POST", "/rooms/group", map[string]any{"name": "持久化"}, 201, &result)
@@ -222,7 +222,7 @@ func TestDataPersistsAndInstanceOrigin(t *testing.T) {
 }
 
 func TestPagination(t *testing.T) {
-	i := newInstance(t, Config{})
+	i := newInstance(t, Config{AllowRegistration: true})
 	c, _ := addUser(t, i.host.URL, "alice")
 	var result map[string]int64
 	call(t, c, i.host.URL, "POST", "/rooms/group", map[string]any{"name": "分页"}, 201, &result)
@@ -291,7 +291,7 @@ func TestRadishOIDCBrowserFlow(t *testing.T) {
 	})
 	provider.Start()
 	defer provider.Close()
-	i := newInstance(t, Config{OIDCIssuer: issuer, OIDCClientID: "test-app", OIDCSecret: "fixture"})
+	i := newInstance(t, Config{AllowRegistration: true, OIDCIssuer: issuer, OIDCClientID: "test-app", OIDCSecret: "fixture"})
 	_, local := addUser(t, i.host.URL, "alice")
 	client := browser(t)
 	begin := func() string {

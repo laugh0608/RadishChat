@@ -34,18 +34,20 @@ func run() error {
 		}
 		secret = strings.TrimRight(string(data), "\r\n")
 	}
-	enabled := env("RADISHCHAT_REGISTRATION", "on")
-	if enabled != "on" && enabled != "off" {
+	registration := env("RADISHCHAT_REGISTRATION", "off")
+	if registration != "on" && registration != "off" {
 		return errors.New("RADISHCHAT_REGISTRATION 仅接受 on 或 off")
 	}
 	s, err := chat.New(chat.Config{
-		PublicURL:      env("RADISHCHAT_PUBLIC_URL", "http://127.0.0.1:8080"),
-		Database:       env("RADISHCHAT_DATABASE", "data/chat.sqlite"),
-		WebDir:         env("RADISHCHAT_WEB_DIR", "web/dist"),
-		OIDCIssuer:     os.Getenv("RADISHCHAT_OIDC_ISSUER"),
-		OIDCClientID:   os.Getenv("RADISHCHAT_OIDC_CLIENT_ID"),
-		OIDCClientAuth: os.Getenv("RADISHCHAT_OIDC_CLIENT_AUTH"),
-		OIDCSecret:     secret, DisableRegistration: enabled == "off",
+		PublicURL:         env("RADISHCHAT_PUBLIC_URL", "http://127.0.0.1:8080"),
+		Database:          env("RADISHCHAT_DATABASE", "data/chat.sqlite"),
+		WebDir:            env("RADISHCHAT_WEB_DIR", "web/dist"),
+		OIDCIssuer:        os.Getenv("RADISHCHAT_OIDC_ISSUER"),
+		OIDCClientID:      os.Getenv("RADISHCHAT_OIDC_CLIENT_ID"),
+		OIDCClientAuth:    os.Getenv("RADISHCHAT_OIDC_CLIENT_AUTH"),
+		OIDCSecret:        secret,
+		AllowRegistration: registration == "on",
+		TrustedProxyIP:    os.Getenv("RADISHCHAT_TRUSTED_PROXY_IP"),
 	})
 	if err != nil {
 		return err

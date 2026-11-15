@@ -8,8 +8,8 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"errors"
-	"net"
 	"net/http"
+	"net/netip"
 	"regexp"
 	"strings"
 	"time"
@@ -107,12 +107,22 @@ func (s *Server) limit(w http.ResponseWriter, key string, limit int) bool {
 	return true
 }
 
-func remoteHost(r *http.Request) string {
-	host, _, err := net.SplitHostPort(r.RemoteAddr)
-	if err == nil {
-		return host
+func (s *Server) clientHost(r *http.Request) string {
+	remote, err := netip.ParseAddrPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
 	}
-	return r.RemoteAddr
+	peer := remote.Addr().WithZone("").Unmap()
+	if peer == s.proxyIP {
+		// The immediate proxy must overwrite X-Forwarded-For with one client IP.
+		if values := r.Header.Values("X-Forwarded-For"); len(values) == 1 {
+			client, err := netip.ParseAddr(strings.TrimSpace(values[0]))
+			if err == nil && client.Zone() == "" {
+				return client.Unmap().String()
+			}
+		}
+	}
+	return peer.String()
 }
 
 func (s *Server) acquirePassword(w http.ResponseWriter) bool {
@@ -126,11 +136,11 @@ func (s *Server) acquirePassword(w http.ResponseWriter) bool {
 }
 
 func (s *Server) register(w http.ResponseWriter, r *http.Request) {
-	if s.cfg.DisableRegistration {
+	if !s.cfg.AllowRegistration {
 		fail(w, 403, "此服务器未开放新账号注册")
 		return
 	}
-	if !s.limit(w, "register:"+remoteHost(r), 12) {
+	if !s.limit(w, "register:"+s.clientHost(r), 12) {
 		return
 	}
 	var p credentials
@@ -181,7 +191,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 }
 
 func (s *Server) login(w http.ResponseWriter, r *http.Request) {
-	if !s.limit(w, "login:"+remoteHost(r), 35) {
+	if !s.limit(w, "login:"+s.clientHost(r), 35) {
 		return
 	}
 	var p credentials
@@ -212,7 +222,7 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	token := randomText(32)
 	err = transaction(r.Context(), s.db, func(tx *sql.Tx) error {
-		if old := cookie(r, sessionCookie); old != "" {
+		if old := s.sessionToken(r); old != "" {
 			if _, err := tx.ExecContext(r.Context(), "DELETE FROM sessions WHERE token_hash=?", digest(old)); err != nil {
 				return err
 			}

@@ -1,13 +1,12 @@
 # 当前状态
 
-更新日期 2026-11-14。
+更新日期 2026-11-15。
 
-**当前阶段是 P1 Web 聊天与自部署内测的实施阶段。** 首批已验收本地检查基线与合成预览 v1 样本。下一项功能任务为 AUTH-01-01，当前待开始。[本地检查基线](../topics/foundation.md#base-03-01) · [迁移样本](../topics/deployment.md#ops-01-01) · [验收记录](../records/2026-11-14-p1-local-baseline.md)
+**当前阶段是 P1 Web 聊天与自部署内测的实施阶段。** 本地检查基线、合成预览 v1 样本和 AUTH-01-01 默认准入与本地会话已通过单项验收。[基线和迁移样本](../records/2026-11-14-p1-local-baseline.md) · [本地会话验收](../records/2026-11-15-auth-local-sessions.md)
 
 | 顺序 | 当前事项 | 出口 |
 | --- | --- | --- |
-| 1 | 按[首批开工顺序](../planning/first-web-slice.md#p1-start-order)接续 [AUTH-01-01 本地准入与会话](../topics/identity.md#auth-01-01) | 复验默认准入、注册开关与会话失效 |
-| 2 | 接续[公网邀请码](../topics/identity.md#auth-01-02)、[私聊与成员操作](../topics/messaging.md#msg-01-01)及[外部登录禁用复验](../topics/identity.md#auth-02-01)。[CI 产品检查](../topics/foundation.md#base-03-02)可独立安排 | 按各子专题验证，迁移阶段使用已固定的 v1 样本副本 |
+| 1 | 按[首批开工顺序](../planning/first-web-slice.md#p1-start-order)接续[公网邀请码](../topics/identity.md#auth-01-02)、[私聊与成员操作](../topics/messaging.md#msg-01-01)及[外部登录禁用复验](../topics/identity.md#auth-02-01)。[CI 产品检查](../topics/foundation.md#base-03-02)可独立安排 | 按各子专题验证，迁移阶段使用已固定的 v1 样本副本 |
 
 真实 Radish 登录的独立验收延期。等 Radish 侧有稳定实例且具备测试发行方、独立客户端、受控测试身份与 HTTPS 回调后，再按 [AUTH-02](../topics/identity.md#auth-02)安排。P1 使用本地账号放行。
 
