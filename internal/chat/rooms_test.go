@@ -130,3 +130,122 @@ func TestGroupMembershipPermissions(t *testing.T) {
 	call(t, foreign, origin, "POST", path+"/messages", message, http.StatusUnauthorized)
 	call(t, foreign, origin, "POST", path+"/members", addCarol, http.StatusUnauthorized)
 }
+
+func TestGroupHistoryUsesCurrentMembership(t *testing.T) {
+	i := newInstance(t, Config{Registration: RegistrationOpen})
+	a, _ := addUser(t, i.host.URL, "alice")
+	c, _ := addUser(t, i.host.URL, "carol")
+	origin := i.host.URL
+	var group struct{ ID int64 }
+	call(t, a, origin, "POST", "/rooms/group", map[string]string{"name": "加入边界"}, http.StatusCreated, &group)
+	roomPath := fmt.Sprintf("/rooms/%d", group.ID)
+	messages := roomPath + "/messages"
+	join := func() {
+		t.Helper()
+		call(t, a, origin, "POST", roomPath+"/members", map[string]string{"username": "carol"}, http.StatusNoContent)
+	}
+	send := func(client *http.Client, key string) int64 {
+		t.Helper()
+		var posted message
+		call(t, client, origin, "POST", messages, map[string]string{"markdown": key, "requestId": key}, http.StatusCreated, &posted)
+		return posted.ID
+	}
+	checkPage := func(client *http.Client, query string, ids ...int64) {
+		t.Helper()
+		var page messagePage
+		call(t, client, origin, "GET", messages+query, nil, http.StatusOK, &page)
+		var got []int64
+		for _, m := range page.Messages {
+			got = append(got, m.ID)
+		}
+		if !slices.Equal(got, ids) || page.More {
+			t.Fatalf("page %q: got %v and more=%v, want %v", query, got, page.More, ids)
+		}
+	}
+	checkLast := func(want int64) {
+		t.Helper()
+		var rooms []room
+		call(t, c, origin, "GET", "/rooms", nil, http.StatusOK, &rooms)
+		if len(rooms) != 1 || rooms[0].LastMessageID != want {
+			t.Fatalf("rooms: %+v, want last visible message %d", rooms, want)
+		}
+	}
+
+	before := send(a, "fixture_before_join")
+	join()
+	checkPage(c, "")
+	checkLast(0)
+	const firstRequest = "fixture_first_membership"
+	first := send(c, firstRequest)
+	checkPage(c, "", first)
+	checkLast(first)
+	retry := map[string]string{"markdown": firstRequest, "requestId": firstRequest}
+	var same message
+	call(t, c, origin, "POST", messages, retry, http.StatusOK, &same)
+	if same.ID != first {
+		t.Fatalf("retry returned %d, want %d", same.ID, first)
+	}
+
+	call(t, c, origin, "POST", roomPath+"/leave", nil, http.StatusNoContent)
+	gap := send(a, "fixture_between_memberships")
+	call(t, c, origin, "GET", messages, nil, http.StatusNotFound)
+	join()
+	checkLast(0)
+	checkPage(c, fmt.Sprintf("?after=%d", first))
+	var conflict map[string]string
+	call(t, c, origin, "POST", messages, retry, http.StatusConflict, &conflict)
+	if len(conflict) != 1 || conflict["error"] == "" {
+		t.Fatalf("retry from previous membership returned message data: %+v", conflict)
+	}
+	newFirst := send(a, "fixture_after_rejoin")
+	newSecond := send(c, "fixture_new_membership")
+	checkLast(newSecond)
+	checkPage(c, "", newFirst, newSecond)
+	checkPage(c, fmt.Sprintf("?after=%d", first), newFirst, newSecond)
+	checkPage(c, fmt.Sprintf("?after=%d", newFirst), newSecond)
+	checkPage(c, fmt.Sprintf("?before=%d", newSecond), newFirst)
+	checkPage(c, fmt.Sprintf("?before=%d", gap))
+	checkPage(a, "", before, first, gap, newFirst, newSecond)
+}
+
+func TestGroupJoinAndSendUseServerOrder(t *testing.T) {
+	i := newInstance(t, Config{Registration: RegistrationOpen})
+	a, _ := addUser(t, i.host.URL, "alice")
+	c, carol := addUser(t, i.host.URL, "carol")
+	origin := i.host.URL
+	for n := range 5 {
+		t.Run(fmt.Sprint(n), func(t *testing.T) {
+			var group struct{ ID int64 }
+			call(t, a, origin, "POST", "/rooms/group", map[string]string{"name": "并行加入"}, http.StatusCreated, &group)
+			path := fmt.Sprintf("/rooms/%d", group.ID)
+			body := func(key string) map[string]string { return map[string]string{"markdown": key, "requestId": key} }
+			var prior, concurrent, later message
+			call(t, a, origin, "POST", path+"/messages", body("fixture_before_race"), http.StatusCreated, &prior)
+			t.Run("concurrent_requests", func(t *testing.T) {
+				t.Run("join", func(t *testing.T) {
+					t.Parallel()
+					call(t, a, origin, "POST", path+"/members", map[string]string{"username": "carol"}, http.StatusNoContent)
+				})
+				t.Run("send", func(t *testing.T) {
+					t.Parallel()
+					call(t, a, origin, "POST", path+"/messages", body("fixture_during_race"), http.StatusCreated, &concurrent)
+				})
+			})
+			call(t, a, origin, "POST", path+"/messages", body("fixture_after_race"), http.StatusCreated, &later)
+			var boundary int64
+			err := i.s.db.QueryRow("SELECT joined_after_message_id FROM members WHERE room_id=? AND user_id=?", group.ID, carol.ID).Scan(&boundary)
+			if err != nil || (boundary != prior.ID && boundary != concurrent.ID) {
+				t.Fatalf("unexpected boundary %d: %v", boundary, err)
+			}
+			want := []message{later}
+			if boundary == prior.ID {
+				want = []message{concurrent, later}
+			}
+			var page messagePage
+			call(t, c, origin, "GET", path+"/messages?after="+fmt.Sprint(prior.ID), nil, http.StatusOK, &page)
+			if !slices.Equal(page.Messages, want) || page.More {
+				t.Fatalf("boundary %d: got %+v, want %+v", boundary, page, want)
+			}
+		})
+	}
+}

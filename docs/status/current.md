@@ -4,9 +4,11 @@
 
 **当前阶段是 P1 Web 聊天与自部署内测的实施阶段。** 本地检查基线、合成预览 v1 样本、默认准入与本地会话、公网邀请码、私聊唯一性和成员操作、外部登录禁用复验已通过单项验收。[基线和迁移样本](../records/2026-11-14-p1-local-baseline.md) · [本地会话验收](../records/2026-11-15-auth-local-sessions.md) · [邀请码验收](../records/2026-11-15-auth-invite.md) · [会话与成员验收](../records/2026-11-15-msg-room-membership.md) · [外部登录禁用验收](../records/2026-11-15-auth-oidc-disabled.md)
 
+群成员本次加入边界和 SQLite v2 迁移已联合通过验收。[迁移与历史授权记录](../records/2026-11-15-membership-sqlite-v2.md)
+
 | 顺序 | 当前事项 | 出口 |
 | --- | --- | --- |
-| 1 | 按[首批开工顺序](../planning/first-web-slice.md#p1-start-order)联合交付[群成员加入边界](../topics/messaging.md#msg-01-02)和 [SQLite 迁移](../topics/deployment.md#ops-01-02)。[CI 产品检查](../topics/foundation.md#base-03-02)可独立安排 | 在固定 v1 样本的隔离副本上验证升级、回退和历史授权 |
+| 1 | 按[首批开工顺序](../planning/first-web-slice.md#p1-start-order)推进[消息确认与重试](../topics/messaging.md#msg-02-01)和 [Markdown 正文与渲染](../topics/messaging.md#msg-03-01)，再做[分页与补拉](../topics/messaging.md#msg-02-02)。[CI 产品检查](../topics/foundation.md#base-03-02)可独立安排 | 验证持久化确认、幂等重试、正文渲染和离线恢复 |
 
 真实 Radish 登录的独立验收延期。等 Radish 侧有稳定实例且具备测试发行方、独立客户端、受控测试身份与 HTTPS 回调后，再按 [AUTH-02](../topics/identity.md#auth-02)安排。P1 使用本地账号放行。
 

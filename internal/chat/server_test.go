@@ -176,8 +176,8 @@ func TestRoomsRealtimeAndPermissions(t *testing.T) {
 	call(t, a, i.host.URL, "POST", group+"/messages", body, 201)
 	call(t, a, i.host.URL, "POST", group+"/members", map[string]string{"username": "carol"}, 204)
 	call(t, c, i.host.URL, "GET", group+"/messages", nil, 200, &page)
-	if len(page.Messages) != 1 {
-		t.Fatal("new member cannot see existing history")
+	if len(page.Messages) != 0 || page.More {
+		t.Fatal("new member can see messages sent before joining")
 	}
 	call(t, c, i.host.URL, "POST", group+"/leave", nil, 204)
 	call(t, c, i.host.URL, "GET", group+"/members", nil, 404)

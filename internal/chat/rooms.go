@@ -40,7 +40,7 @@ func (s *Server) listRooms(w http.ResponseWriter, r *http.Request, u user) {
 	rows, err := s.db.QueryContext(r.Context(), `
 		SELECT r.id,r.kind,coalesce(peer.display_name,r.name),coalesce(peer.username,''),coalesce(r.owner_id,0),
 			(SELECT count(*) FROM members WHERE room_id=r.id),
-			coalesce((SELECT id FROM messages WHERE room_id=r.id ORDER BY id DESC LIMIT 1),0) AS last
+			coalesce((SELECT id FROM messages WHERE room_id=r.id AND id>m.joined_after_message_id ORDER BY id DESC LIMIT 1),0) AS last
 		FROM members m JOIN rooms r ON r.id=m.room_id
 		LEFT JOIN users peer ON peer.id=CASE WHEN r.direct_a=m.user_id THEN r.direct_b ELSE r.direct_a END
 		WHERE m.user_id=? ORDER BY last DESC,r.id DESC`, u.ID)
@@ -101,7 +101,7 @@ func (s *Server) directRoom(w http.ResponseWriter, r *http.Request, u user) {
 		if err := tx.QueryRowContext(ctx, "SELECT id FROM rooms WHERE direct_a=? AND direct_b=?", a, b).Scan(&id); err != nil {
 			return err
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO members VALUES (?,?),(?,?) ON CONFLICT(room_id,user_id) DO NOTHING", id, a, id, b)
+		_, err = tx.ExecContext(ctx, "INSERT INTO members(room_id,user_id) VALUES (?,?),(?,?) ON CONFLICT(room_id,user_id) DO NOTHING", id, a, id, b)
 		return err
 	})
 	if errors.Is(err, errMissing) {
@@ -153,7 +153,7 @@ func (s *Server) groupRoom(w http.ResponseWriter, r *http.Request, u user) {
 			return err
 		}
 		for _, member := range people {
-			if _, err := tx.ExecContext(ctx, "INSERT INTO members VALUES (?,?)", id, member); err != nil {
+			if _, err := tx.ExecContext(ctx, "INSERT INTO members(room_id,user_id) VALUES (?,?)", id, member); err != nil {
 				return err
 			}
 		}
@@ -171,14 +171,19 @@ func (s *Server) groupRoom(w http.ResponseWriter, r *http.Request, u user) {
 	reply(w, 201, map[string]int64{"id": id})
 }
 
-func access(ctx context.Context, tx *sql.Tx, roomID, userID int64) (int64, error) {
-	var owner int64
-	err := tx.QueryRowContext(ctx, `SELECT coalesce(r.owner_id,0) FROM members m JOIN rooms r ON r.id=m.room_id
-		WHERE m.room_id=? AND m.user_id=?`, roomID, userID).Scan(&owner)
+type membership struct {
+	ownerID              int64
+	joinedAfterMessageID int64
+}
+
+func access(ctx context.Context, tx *sql.Tx, roomID, userID int64) (membership, error) {
+	var member membership
+	err := tx.QueryRowContext(ctx, `SELECT coalesce(r.owner_id,0),m.joined_after_message_id FROM members m JOIN rooms r ON r.id=m.room_id
+		WHERE m.room_id=? AND m.user_id=?`, roomID, userID).Scan(&member.ownerID, &member.joinedAfterMessageID)
 	if errors.Is(err, sql.ErrNoRows) {
-		return 0, errMissing
+		return member, errMissing
 	}
-	return owner, err
+	return member, err
 }
 
 func roomError(w http.ResponseWriter, op string, err error) {
@@ -192,7 +197,7 @@ func roomError(w http.ResponseWriter, op string, err error) {
 	case errors.Is(err, errMember):
 		fail(w, 409, "此用户已在群内")
 	case errors.Is(err, errRequestConflict):
-		fail(w, 409, "同一发送标识不能用于不同消息")
+		fail(w, 409, "发送标识已被使用")
 	default:
 		internal(w, op, err)
 	}
@@ -256,11 +261,11 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request, u user) {
 	rid := intID(r.PathValue("room"))
 	var people []int64
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		owner, err := access(ctx, tx, rid, u.ID)
+		current, err := access(ctx, tx, rid, u.ID)
 		if err != nil {
 			return err
 		}
-		if owner != u.ID {
+		if current.ownerID != u.ID {
 			return errOwner
 		}
 		member, err := findUser(ctx, tx, input.Username)
@@ -279,7 +284,8 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request, u user) {
 		if len(people) >= 50 {
 			return errGroupFull
 		}
-		_, err = tx.ExecContext(ctx, "INSERT INTO members VALUES (?,?)", rid, member)
+		_, err = tx.ExecContext(ctx, `INSERT INTO members(room_id,user_id,joined_after_message_id)
+			SELECT ?,?,coalesce(max(id),0) FROM messages WHERE room_id=?`, rid, member, rid)
 		people = append(people, member)
 		return err
 	})
@@ -296,11 +302,11 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request, u user) {
 	rid, member := intID(r.PathValue("room")), intID(r.PathValue("member"))
 	var people []int64
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		owner, err := access(ctx, tx, rid, u.ID)
+		current, err := access(ctx, tx, rid, u.ID)
 		if err != nil {
 			return err
 		}
-		if owner != u.ID || member == owner {
+		if current.ownerID != u.ID || member == current.ownerID {
 			return errOwner
 		}
 		res, err := tx.ExecContext(ctx, "DELETE FROM members WHERE room_id=? AND user_id=?", rid, member)
@@ -337,20 +343,20 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request, u user) {
 	}
 	out := messagePage{Messages: make([]message, 0)}
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		if _, err := access(ctx, tx, rid, u.ID); err != nil {
+		current, err := access(ctx, tx, rid, u.ID)
+		if err != nil {
 			return err
 		}
 		base := `SELECT m.id,u.id,u.username,u.display_name,m.body,m.sent_at
-			FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.room_id=?`
+			FROM messages m JOIN users u ON u.id=m.sender_id WHERE m.room_id=? AND m.id>?`
 		var rs *sql.Rows
-		var err error
 		switch {
 		case before != 0:
-			rs, err = tx.QueryContext(ctx, base+" AND m.id<? ORDER BY m.id DESC LIMIT 51", rid, before)
+			rs, err = tx.QueryContext(ctx, base+" AND m.id<? ORDER BY m.id DESC LIMIT 51", rid, current.joinedAfterMessageID, before)
 		case after != 0:
-			rs, err = tx.QueryContext(ctx, base+" AND m.id>? ORDER BY m.id ASC LIMIT 51", rid, after)
+			rs, err = tx.QueryContext(ctx, base+" ORDER BY m.id ASC LIMIT 51", rid, max(current.joinedAfterMessageID, after))
 		default:
-			rs, err = tx.QueryContext(ctx, base+" ORDER BY m.id DESC LIMIT 51", rid)
+			rs, err = tx.QueryContext(ctx, base+" ORDER BY m.id DESC LIMIT 51", rid, current.joinedAfterMessageID)
 		}
 		if err != nil {
 			return err
@@ -399,13 +405,14 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, u user) {
 	m := message{Author: u, Markdown: input.Markdown, SentAt: time.Now().UnixMilli()}
 	var people []int64
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		if _, err := access(ctx, tx, rid, u.ID); err != nil {
+		current, err := access(ctx, tx, rid, u.ID)
+		if err != nil {
 			return err
 		}
 		var body string
-		err := tx.QueryRowContext(ctx, `SELECT id,body,sent_at FROM messages WHERE room_id=? AND sender_id=? AND request_id=?`, rid, u.ID, input.RequestID).Scan(&m.ID, &body, &m.SentAt)
+		err = tx.QueryRowContext(ctx, `SELECT id,body,sent_at FROM messages WHERE room_id=? AND sender_id=? AND request_id=?`, rid, u.ID, input.RequestID).Scan(&m.ID, &body, &m.SentAt)
 		if err == nil {
-			if body != input.Markdown {
+			if m.ID <= current.joinedAfterMessageID || body != input.Markdown {
 				return errRequestConflict
 			}
 			return nil
@@ -441,11 +448,11 @@ func (s *Server) leaveGroup(w http.ResponseWriter, r *http.Request, u user) {
 	rid := intID(r.PathValue("room"))
 	var people []int64
 	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
-		owner, err := access(ctx, tx, rid, u.ID)
+		current, err := access(ctx, tx, rid, u.ID)
 		if err != nil {
 			return err
 		}
-		if owner == 0 || owner == u.ID {
+		if current.ownerID == 0 || current.ownerID == u.ID {
 			return errOwner
 		}
 		if _, err = tx.ExecContext(ctx, "DELETE FROM members WHERE room_id=? AND user_id=?", rid, u.ID); err != nil {

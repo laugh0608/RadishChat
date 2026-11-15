@@ -12,7 +12,7 @@ import (
 	_ "modernc.org/sqlite"
 )
 
-const schema = `
+const schemaV1 = `
 CREATE TABLE users (
   id INTEGER PRIMARY KEY,
   username TEXT NOT NULL UNIQUE,
@@ -69,6 +69,14 @@ CREATE INDEX messages_room ON messages(room_id, id DESC);
 PRAGMA user_version = 1;
 `
 
+const migrateV1ToV2 = `
+ALTER TABLE members ADD COLUMN joined_after_message_id INTEGER NOT NULL DEFAULT 0 CHECK (joined_after_message_id >= 0);
+UPDATE members SET joined_after_message_id = coalesce(
+  (SELECT max(id) FROM messages WHERE room_id = members.room_id), 0
+) WHERE room_id IN (SELECT id FROM rooms WHERE kind = 'group');
+PRAGMA user_version = 2;
+`
+
 func openDB(path string) (*sql.DB, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -95,16 +103,24 @@ func openDB(path string) (*sql.DB, error) {
 	}
 	// 单实例使用一条写连接；事务不得另行从 DB 取第二条连接。
 	db.SetMaxOpenConns(1)
-	err = transaction(context.Background(), db, func(tx *sql.Tx) error {
+	ctx := context.Background()
+	err = transaction(ctx, db, func(tx *sql.Tx) error {
 		var version int
-		if err := tx.QueryRow("PRAGMA user_version").Scan(&version); err != nil {
+		if err := tx.QueryRowContext(ctx, "PRAGMA user_version").Scan(&version); err != nil {
 			return err
 		}
 		switch version {
 		case 0:
-			_, err := tx.Exec(schema)
-			return err
+			if _, err := tx.ExecContext(ctx, schemaV1); err != nil {
+				return fmt.Errorf("SQLite 初始化失败: %w", err)
+			}
+			fallthrough
 		case 1:
+			if _, err := tx.ExecContext(ctx, migrateV1ToV2); err != nil {
+				return fmt.Errorf("SQLite 从 v1 迁移到 v2 失败: %w", err)
+			}
+			return nil
+		case 2:
 			return nil
 		default:
 			return fmt.Errorf("未支持的数据库版本 %d", version)
