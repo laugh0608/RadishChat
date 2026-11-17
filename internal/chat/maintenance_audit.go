@@ -15,8 +15,11 @@ const (
 	auditAccountDisable  = "account.disable"
 	auditIssueRecovery   = "account.issue-recovery"
 	auditAccountReopen   = "account.reopen"
+	auditReportReview    = "report.review"
+	auditReportClose     = "report.close"
 	auditSuccess         = "success"
 	auditAlreadyDisabled = "already_disabled"
+	auditEvidenceMissing = "evidence_unavailable"
 )
 
 type MaintenanceAuditEntry struct {
@@ -24,7 +27,8 @@ type MaintenanceAuditEntry struct {
 	OccurredAt   int64  `json:"occurredAt"`
 	Source       string `json:"source"`
 	Action       string `json:"action"`
-	TargetUserID int64  `json:"targetUserId"`
+	TargetUserID int64  `json:"targetUserId,omitempty"`
+	ReportID     int64  `json:"reportId,omitempty"`
 	Result       string `json:"result"`
 }
 
@@ -49,10 +53,10 @@ func openMaintenanceDB(ctx context.Context, database, mode string) (*sql.DB, err
 	return db, nil
 }
 
-func appendMaintenanceAudit(ctx context.Context, tx *sql.Tx, action string, targetUserID int64, result string) error {
+func appendMaintenanceAudit(ctx context.Context, tx *sql.Tx, action string, targetUserID int64, result string, reportID int64) error {
 	var id int64
-	err := tx.QueryRowContext(ctx, `INSERT INTO maintenance_audit(occurred_at,source,action,target_user_id,result)
-		VALUES (?,'maintenance_cli',?,?,?) RETURNING id`, time.Now().UnixMilli(), action, targetUserID, result).Scan(&id)
+	err := tx.QueryRowContext(ctx, `INSERT INTO maintenance_audit(occurred_at,source,action,target_user_id,result,report_id)
+		VALUES (?,'maintenance_cli',?,nullif(?,0),?,nullif(?,0)) RETURNING id`, time.Now().UnixMilli(), action, targetUserID, result, reportID).Scan(&id)
 	if err != nil {
 		return fmt.Errorf("写入维护审计: %w", err)
 	}
@@ -69,7 +73,7 @@ func ListMaintenanceAudit(ctx context.Context, database string, before int64, li
 		return nil, err
 	}
 	defer db.Close()
-	rows, err := db.QueryContext(ctx, `SELECT id,occurred_at,source,action,target_user_id,result FROM maintenance_audit
+	rows, err := db.QueryContext(ctx, `SELECT id,occurred_at,source,action,coalesce(target_user_id,0),result,coalesce(report_id,0) FROM maintenance_audit
 		WHERE occurred_at>? AND (?=0 OR id<?) ORDER BY id DESC LIMIT ?`,
 		time.Now().Add(-maintenanceAuditRetention).UnixMilli(), before, before, limit)
 	if err != nil {
@@ -79,7 +83,7 @@ func ListMaintenanceAudit(ctx context.Context, database string, before int64, li
 	entries := make([]MaintenanceAuditEntry, 0, limit)
 	for rows.Next() {
 		var entry MaintenanceAuditEntry
-		if err := rows.Scan(&entry.ID, &entry.OccurredAt, &entry.Source, &entry.Action, &entry.TargetUserID, &entry.Result); err != nil {
+		if err := rows.Scan(&entry.ID, &entry.OccurredAt, &entry.Source, &entry.Action, &entry.TargetUserID, &entry.Result, &entry.ReportID); err != nil {
 			return nil, fmt.Errorf("读取维护审计: %w", err)
 		}
 		entries = append(entries, entry)

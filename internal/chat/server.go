@@ -151,6 +151,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/rooms/{room}/leave", s.withUser(s.leaveGroup))
 	s.mux.HandleFunc("GET /api/v1/rooms/{room}/messages", s.withUser(s.listMessages))
 	s.mux.HandleFunc("POST /api/v1/rooms/{room}/messages", s.withUser(s.sendMessage))
+	s.mux.HandleFunc("POST /api/v1/rooms/{room}/messages/{message}/reports", s.withUser(s.submitMessageReport))
 	s.mux.HandleFunc("/api/", func(w http.ResponseWriter, _ *http.Request) { fail(w, 404, "接口不存在") })
 
 	if s.cfg.WebDir != "" {

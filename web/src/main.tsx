@@ -4,6 +4,7 @@ import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { api, errorText, openServer, RequestError, type Account, type Info, type Message, type Page, type Room } from './api';
 import { BotManager, GroupBots } from './bots';
+import { MessageReport } from './report';
 import { clearDrafts, draftKey, readDraft, retainDrafts, saveDraft, type Draft } from './drafts';
 import './style.css';
 
@@ -391,6 +392,7 @@ function Conversation({me, room, version, onChange, onBack, onAccessLost}: {
           <time dateTime={new Date(m.sentAt).toISOString()}>{formatter.format(m.sentAt)}</time>
         </div>
         <div className="markdown"><MessageBody body={m.markdown} /></div>
+        {room.kind === 'group' && <MessageReport room={room} messageId={m.id} getRoomSignal={() => paging.current?.controller.signal} />}
       </article>)}
     </div>
     <form className="composer" onSubmit={send}>

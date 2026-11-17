@@ -78,6 +78,10 @@ input::placeholder,textarea::placeholder{color:#647067}
 .message-meta{display:flex;flex-wrap:wrap;align-items:baseline;gap:6px 12px;margin-bottom:5px;font-size:.73rem;color:var(--muted)}
 .message-meta strong{color:#305843;overflow-wrap:anywhere}
 .message-bot{border:1px solid var(--rule);border-radius:5px;padding:0 4px;color:var(--green);background:var(--pale)}
+.message-report{margin-top:5px}
+.message-report .text-button{min-height:32px;padding-block:4px;font-size:.78rem}
+.message-report form{border-top:1px solid var(--rule);padding-top:9px;gap:8px}
+.message-report select{min-height:36px;width:100%;border:1px solid var(--rule);border-radius:8px;background:var(--panel);color:var(--ink);font:inherit;padding:5px 8px}
 .markdown{font-size:.94rem;line-height:1.6;overflow-wrap:anywhere;min-width:0}
 .markdown>*{margin:0 0 .4em}
 .markdown>:last-child{margin-bottom:0}

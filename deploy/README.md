@@ -46,13 +46,39 @@ SQLite v9 起，停用、签发或重签恢复码、解除停用与维护审计�
 docker compose --env-file instance.env exec -T chat radishchat ops audit --limit 50
 ```
 
-直接运行时使用指向该实例数据库的 `RADISHCHAT_DATABASE` 及 `radishchat ops audit`。命令以只读方式打开现有数据库，按记录编号降序返回 JSON 数组。默认 50 条，`--limit` 可设为 1 至 200。用上一页最后一项的 `id` 指定 `--before` 继续向前查看。字段为 `id`、Unix 毫秒 `occurredAt`、`source`、`action`、`targetUserId` 和 `result`。`source` 表示维护入口，个人归因依赖部署环境的身份记录。到期记录的数据库清理归 `OPS-02-03`。[审计范围](../docs/topics/deployment.md#ops-02-first-batch)
+直接运行时使用指向该实例数据库的 `RADISHCHAT_DATABASE` 及 `radishchat ops audit`。命令以只读方式打开现有数据库，按记录编号降序返回 JSON 数组。默认 50 条，`--limit` 可设为 1 至 200。用上一页最后一项的 `id` 指定 `--before` 继续向前查看。字段为 `id`、Unix 毫秒 `occurredAt`、`source`、`action`、`result`，以及适用的 `targetUserId` 和 `reportId`。`source` 表示维护入口，个人归因依赖部署环境的身份记录。到期记录的数据库清理归 `OPS-02-03`。[审计范围](../docs/topics/deployment.md#ops-02-first-batch)
+
+<a id="message-reports"></a>
+
+## 普通群举报审阅与结案
+
+成员在普通群的单条消息下选择「举报」，确认本实例的维护者可以查阅该消息后提交原因，并获得举报编号。部署维护者使用实例的现有维护身份操作。直接运行时使 `RADISHCHAT_DATABASE` 指向目标实例的 v10 数据库。Compose 安装可在同一实例安装目录为以下命令加上 `docker compose --env-file instance.env exec -T chat`。
+
+查看待处理举报。列表按编号降序，仅输出元数据。`--status` 接受 `open` 或 `closed`，省略时查询两类，关闭超过 30 天的举报超出命令查询窗口。`--limit` 默认为 50，范围 1–200。向前翻页使用 `--before` 和上一页最后的编号。
+
+```sh
+radishchat ops reports list --status open
+```
+
+核对编号后在受保护终端审阅，将 `42` 替换为待查举报。审阅先提交 `report.review` 审计，再输出该举报与所指消息原文。证据已不可用时输出 `evidence: null`。举报原文属于维护输出，交接和诊断材料须保护这部分数据。
+
+```sh
+radishchat ops reports review 42
+```
+
+完成核实后选择一种结案结果。以下示例用于确认需要停用该条消息的本地账号作者时。维护者以被举报消息的作者为准，命令在同一事务内提交结案、撤权及关联审计。
+
+```sh
+radishchat ops reports close 42 account_disabled
+```
+
+`dismissed` 用于结束处理且保留当前授权。Bot 举报经维护者和群主沟通后，使用 `referred_to_group_owner` 记录转交，群主按群权限处理安装。以原结果重跑结案可取回原记录，改用不同结果时命令返回错误。到期记录的数据库清理接续于 `OPS-02-03`。[授权与处置设计](../docs/topics/deployment.md#ops-02-first-batch)
 
 <a id="sqlite-backup-restore"></a>
 
 ## SQLite 备份、恢复与升级回退
 
-候选镜像中的 `radishchat backup <备份文件>` 从 `RADISHCHAT_DATABASE` 生成快照，`radishchat restore <备份文件>` 向该变量指定的新路径恢复。命令可读取 v1 至 v9 并保留原库版本，检查 SQLite 完整性和外键，清除副本内的登录会话与未完成的 OIDC 流程。v4 起副本保留 Bot 定义及所有者，清除 Bot 凭据摘要。v5 起也清除待审批和生效的安装，v6 起的待交付命令事件与去重摘要随安装清除。v7 起已发送的 Bot 回复和作者身份随群历史保留。v8 起副本保留快照中的账号状态和密码散列，清除恢复码。v9 起维护审计随快照保留操作时间，恢复时继续按原操作时间计算查询窗口。恢复后由 Bot 所有者重新签发凭据，群主按需重新安装，Bot 使用新安装的游标。目标使用受保护的本地目录和 `0600` 的文件。命令拒绝覆盖现有数据库及其 SQLite 辅助文件。正常重启沿用原卷内的账号状态、有效会话、Bot 凭据、安装及有效事件。[本机维护审计](#maintenance-audit) · [账号恢复设计](../docs/topics/identity.md#auth-03-local-design) · [Bot 群安装 API](../docs/api/v1.md#bot-installations)
+候选镜像中的 `radishchat backup <备份文件>` 从 `RADISHCHAT_DATABASE` 生成快照，`radishchat restore <备份文件>` 向该变量指定的新路径恢复。命令可读取 v1 至 v10 并保留原库版本，检查 SQLite 完整性和外键，清除副本内的登录会话与未完成的 OIDC 流程。v4 起副本保留 Bot 定义及所有者，清除 Bot 凭据摘要。v5 起也清除待审批和生效的安装，v6 起的待交付命令事件与去重摘要随安装清除。v7 起已发送的 Bot 回复和作者身份随群历史保留。v8 起副本保留快照中的账号状态和密码散列，清除恢复码。v9 起维护审计随快照保留操作时间，v10 起保留举报和结案状态。恢复后继续按原操作或结案时间计算查询窗口。恢复后由 Bot 所有者重新签发凭据，群主按需重新安装，Bot 使用新安装的游标。目标使用受保护的本地目录和 `0600` 的文件。命令拒绝覆盖现有数据库及其 SQLite 辅助文件。正常重启沿用原卷内的账号状态、有效会话、Bot 凭据、安装及有效事件。[本机维护审计](#maintenance-audit) · [普通群举报审阅与结案](#message-reports) · [账号恢复设计](../docs/topics/identity.md#auth-03-local-design)
 
 在源实例的安装目录停止应用，将数据卷以只读方式交给带维护命令的候选镜像。备份仍含账号、密码散列、成员和消息正文。单独保存备份记录和原版本镜像标识，限制备份目录和副本的访问权限。
 

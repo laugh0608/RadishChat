@@ -2,12 +2,11 @@
 
 更新日期 2026-11-17。
 
-**P2 群聊扩展与内测完善正在实施。** `BOT-01`、`BOT-02` 和 `AUTH-03` 首批本地路径已通过本机验收。`OPS-02-01` 的事务内审计、权限边界和准入复验已通过。开发分支的 SQLite 当前版本为 v9。[维护审计验收](../records/2026-11-17-maintenance-audit.md) · [账号恢复验收](../records/2026-11-17-account-recovery.md) · [独立 Bot 接入验收](../records/2026-11-17-bot-independent-acceptance.md)
+**P2 群聊扩展与内测完善正在实施。** `BOT-01`、`BOT-02` 和 `AUTH-03` 首批本地路径已通过本机验收。`OPS-02-01` 维护审计和 `OPS-02-02` 普通群举报与结案已通过本机验收。开发分支的 SQLite 当前版本为 v10。[举报与结案验收](../records/2026-11-17-group-message-reports.md) · [维护审计验收](../records/2026-11-17-maintenance-audit.md) · [账号恢复验收](../records/2026-11-17-account-recovery.md) · [独立 Bot 接入验收](../records/2026-11-17-bot-independent-acceptance.md)
 
 ## 接下来的事项
 
-1. 实现 `OPS-02-02` 普通群举报与结案。成员可举报当前有权查看的单条消息，维护者可按举报编号审阅和结案，并在需要时关联本地账号停用。[实施条目](../topics/deployment.md#ops-02-02)
-2. 接续 `OPS-02-03` 数据处置与联合验收，交付受控导出、结案举报 30 天和维护审计 90 天到期清理，并复验快照恢复。[首批方案](../topics/deployment.md#ops-02-first-batch) · [实施条目](../topics/deployment.md#ops-02-03)
+1. 实现 `OPS-02-03` 数据处置与联合验收，交付受控导出、结案举报 30 天和维护审计 90 天到期清理，并复验快照恢复。[首批方案](../topics/deployment.md#ops-02-first-batch) · [实施条目](../topics/deployment.md#ops-02-03)
 
 ## 已有验收与待安排事项
 

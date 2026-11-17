@@ -91,11 +91,46 @@ CREATE INDEX maintenance_audit_time ON users(status);
 		t.Fatal(err)
 	}
 	defer db.Close()
-	checkDBInt(t, db, "PRAGMA user_version", 9)
+	checkDBInt(t, db, "PRAGMA user_version", currentSchemaVersion)
 	checkDBInt(t, db, "SELECT count(*) FROM maintenance_audit", 0)
 	checkDBInt(t, db, "SELECT count(*) FROM users WHERE status='disabled'", 1)
 	checkDBInt(t, db, "SELECT count(*) FROM sessions WHERE user_id=2", 1)
 	checkDBInt(t, db, "SELECT count(*) FROM account_recovery_codes WHERE user_id=3", 1)
+}
+
+func TestMigrateV9PreservesAudit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chat.sqlite")
+	legacy, err := sqliteDatabase(path, "rwc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacy.Close()
+	if _, err := legacy.Exec(schemaV1 + migrateV1ToV2 + migrateV2ToV3 + migrateV3ToV4 + migrateV4ToV5 + migrateV5ToV6 + migrateV6ToV7 + migrateV7ToV8 + migrateV8ToV9 + `
+INSERT INTO maintenance_audit(id,occurred_at,source,action,target_user_id,result)
+  VALUES (17,123,'maintenance_cli','account.disable',42,'already_disabled');
+CREATE INDEX message_reports_message ON users(status);
+`); err != nil {
+		t.Fatal(err)
+	}
+	if db, err := openDB(path); err == nil {
+		db.Close()
+		t.Fatal("migration unexpectedly succeeded")
+	}
+	checkDBInt(t, legacy, "PRAGMA user_version", 9)
+	checkDBInt(t, legacy, "SELECT count(*) FROM sqlite_schema WHERE name='message_reports'", 0)
+	checkDBInt(t, legacy, "SELECT count(*) FROM maintenance_audit WHERE id=17", 1)
+	if _, err := legacy.Exec("DROP INDEX message_reports_message"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := openDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	checkDBInt(t, db, "PRAGMA user_version", 10)
+	checkDBInt(t, db, "SELECT count(*) FROM message_reports", 0)
+	checkDBInt(t, db, `SELECT count(*) FROM maintenance_audit WHERE id=17 AND occurred_at=123 AND action='account.disable'
+		AND source='maintenance_cli' AND target_user_id=42 AND result='already_disabled' AND report_id IS NULL`, 1)
 }
 
 func TestOpenDBInitializesCurrentSchemaAndRejectsUnknownVersion(t *testing.T) {

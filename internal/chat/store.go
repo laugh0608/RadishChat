@@ -16,7 +16,7 @@ const (
 	botSchemaVersion             = 4
 	botInstallationSchemaVersion = 5
 	accountStateSchemaVersion    = 8
-	currentSchemaVersion         = 9
+	currentSchemaVersion         = 10
 )
 
 const schemaV1 = `
@@ -192,6 +192,38 @@ CREATE INDEX maintenance_audit_time ON maintenance_audit(occurred_at);
 PRAGMA user_version = 9;
 `
 
+const migrateV9ToV10 = `
+CREATE TABLE message_reports (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  room_id INTEGER NOT NULL CHECK (room_id > 0),
+  message_id INTEGER REFERENCES messages(id) ON DELETE SET NULL,
+  reporter_user_id INTEGER NOT NULL REFERENCES users(id),
+  reason TEXT NOT NULL CHECK (reason IN ('spam','harassment','other')),
+  created_at INTEGER NOT NULL,
+  decision TEXT CHECK (decision IN ('dismissed','account_disabled','referred_to_group_owner')),
+  closed_at INTEGER,
+  CHECK ((closed_at IS NULL) = (decision IS NULL)),
+  UNIQUE (reporter_user_id,message_id)
+);
+CREATE INDEX message_reports_message ON message_reports(message_id);
+ALTER TABLE maintenance_audit RENAME TO maintenance_audit_v9;
+CREATE TABLE maintenance_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  occurred_at INTEGER NOT NULL,
+  source TEXT NOT NULL CHECK (source = 'maintenance_cli'),
+  action TEXT NOT NULL CHECK (action IN ('account.disable','account.issue-recovery','account.reopen','report.review','report.close')),
+  target_user_id INTEGER CHECK (target_user_id > 0),
+  report_id INTEGER CHECK (report_id > 0),
+  result TEXT NOT NULL CHECK (result IN ('success','already_disabled','evidence_unavailable',
+    'dismissed','account_disabled','referred_to_group_owner'))
+);
+INSERT INTO maintenance_audit(id,occurred_at,source,action,target_user_id,result)
+  SELECT id,occurred_at,source,action,target_user_id,result FROM maintenance_audit_v9;
+DROP TABLE maintenance_audit_v9;
+CREATE INDEX maintenance_audit_time ON maintenance_audit(occurred_at);
+PRAGMA user_version = 10;
+`
+
 func openDB(path string) (*sql.DB, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -261,6 +293,11 @@ func openDB(path string) (*sql.DB, error) {
 		case 8:
 			if _, err := tx.ExecContext(ctx, migrateV8ToV9); err != nil {
 				return fmt.Errorf("SQLite 从 v8 迁移到 v9 失败: %w", err)
+			}
+			fallthrough
+		case 9:
+			if _, err := tx.ExecContext(ctx, migrateV9ToV10); err != nil {
+				return fmt.Errorf("SQLite 从 v9 迁移到 v10 失败: %w", err)
 			}
 			return nil
 		case currentSchemaVersion:
