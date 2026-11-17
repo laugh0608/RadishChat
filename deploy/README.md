@@ -26,7 +26,7 @@ docker image inspect --format '{{.Id}} {{.Os}}/{{.Architecture}}' radishchat:p1-
 docker compose --env-file instance.env exec -T chat radishchat account issue-recovery 42
 ```
 
-直接运行二进制时，使 `RADISHCHAT_DATABASE` 指向目标实例现有的 v8 数据库，再执行相应的 `radishchat account` 命令。服务可以继续运行。版本、账号类型或状态不匹配时命令报错，数据库繁忙时可重试。
+直接运行二进制时，使 `RADISHCHAT_DATABASE` 指向目标实例由同版本服务初始化或升级的数据库，再执行相应的 `radishchat account` 命令。服务可以继续运行。版本、账号类型或状态不匹配时命令报错，数据库繁忙时可重试。
 
 - `disable` 撤销账号的旧会话、恢复码及其 Bot 的凭据和安装，保留已有消息和成员关系。重复停用同一账号可安全执行。
 - `issue-recovery` 用于可用或待恢复账号。维护者通过已有受控渠道核实本人身份后执行，目标进入待恢复状态且旧会话失效。重签覆盖旧码。到期、遗失或错过输出时可重签。
@@ -34,11 +34,25 @@ docker compose --env-file instance.env exec -T chat radishchat account issue-rec
 
 签发或解除停用后的输出是一枚 15 分钟有效的一次性恢复码。在受保护终端读取，通过已核实的渠道交给账号本人，运维记录排除恢复码。本人在目标实例登录页选择「忘记密码？」，填写用户名、恢复码和新密码，再用新密码登录。若提交后连接中断，先尝试用新密码登录，再按需联系维护者重签。[账号恢复与停用合同](../docs/topics/identity.md#auth-03-local-design)
 
+<a id="maintenance-audit"></a>
+
+## 本机维护审计
+
+SQLite v9 起，停用、签发或重签恢复码、解除停用与维护审计同一事务提交。写入审计失败时可按命令错误处理并重试，已有状态、会话和 Bot 授权保留。成功重复停用记录为 `already_disabled`，便于区分首次停用。
+
+使用具备实例数据卷访问权限的维护身份，从该实例安装目录读取最近 90 天的审计。
+
+```sh
+docker compose --env-file instance.env exec -T chat radishchat ops audit --limit 50
+```
+
+直接运行时使用指向该实例数据库的 `RADISHCHAT_DATABASE` 及 `radishchat ops audit`。命令以只读方式打开现有数据库，按记录编号降序返回 JSON 数组。默认 50 条，`--limit` 可设为 1 至 200。用上一页最后一项的 `id` 指定 `--before` 继续向前查看。字段为 `id`、Unix 毫秒 `occurredAt`、`source`、`action`、`targetUserId` 和 `result`。`source` 表示维护入口，个人归因依赖部署环境的身份记录。到期记录的数据库清理归 `OPS-02-03`。[审计范围](../docs/topics/deployment.md#ops-02-first-batch)
+
 <a id="sqlite-backup-restore"></a>
 
 ## SQLite 备份、恢复与升级回退
 
-候选镜像中的 `radishchat backup <备份文件>` 从 `RADISHCHAT_DATABASE` 生成快照，`radishchat restore <备份文件>` 向该变量指定的新路径恢复。命令可读取 v1 至 v8 并保留原库版本，检查 SQLite 完整性和外键，清除副本内的登录会话与未完成的 OIDC 流程。v4 起副本保留 Bot 定义及所有者，清除 Bot 凭据摘要。v5 起也清除待审批和生效的安装，v6 起的待交付命令事件与去重摘要随安装清除。v7 起已发送的 Bot 回复和作者身份随群历史保留。v8 副本保留快照中的账号状态和密码散列，清除恢复码。恢复后由 Bot 所有者重新签发凭据，群主按需重新安装，Bot 使用新安装的游标。目标使用受保护的本地目录和 `0600` 的文件。命令拒绝覆盖现有数据库及其 SQLite 辅助文件。正常重启沿用原卷内的账号状态、有效会话、Bot 凭据、安装及有效事件。[账号恢复设计](../docs/topics/identity.md#auth-03-local-design) · [Bot 群安装 API](../docs/api/v1.md#bot-installations)
+候选镜像中的 `radishchat backup <备份文件>` 从 `RADISHCHAT_DATABASE` 生成快照，`radishchat restore <备份文件>` 向该变量指定的新路径恢复。命令可读取 v1 至 v9 并保留原库版本，检查 SQLite 完整性和外键，清除副本内的登录会话与未完成的 OIDC 流程。v4 起副本保留 Bot 定义及所有者，清除 Bot 凭据摘要。v5 起也清除待审批和生效的安装，v6 起的待交付命令事件与去重摘要随安装清除。v7 起已发送的 Bot 回复和作者身份随群历史保留。v8 起副本保留快照中的账号状态和密码散列，清除恢复码。v9 起维护审计随快照保留操作时间，恢复时继续按原操作时间计算查询窗口。恢复后由 Bot 所有者重新签发凭据，群主按需重新安装，Bot 使用新安装的游标。目标使用受保护的本地目录和 `0600` 的文件。命令拒绝覆盖现有数据库及其 SQLite 辅助文件。正常重启沿用原卷内的账号状态、有效会话、Bot 凭据、安装及有效事件。[本机维护审计](#maintenance-audit) · [账号恢复设计](../docs/topics/identity.md#auth-03-local-design) · [Bot 群安装 API](../docs/api/v1.md#bot-installations)
 
 在源实例的安装目录停止应用，将数据卷以只读方式交给带维护命令的候选镜像。备份仍含账号、密码散列、成员和消息正文。单独保存备份记录和原版本镜像标识，限制备份目录和副本的访问权限。
 

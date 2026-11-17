@@ -48,12 +48,54 @@ CREATE INDEX sessions_user ON sessions(expires);
 		t.Fatal(err)
 	}
 	defer db.Close()
-	checkDBInt(t, db, "PRAGMA user_version", 8)
+	checkDBInt(t, db, "PRAGMA user_version", currentSchemaVersion)
 	checkDBInt(t, db, "SELECT count(*) FROM users WHERE status='active'", 2)
 	checkDBInt(t, db, "SELECT count(*) FROM users WHERE id=1 AND password='fixture-hash'", 1)
 	checkDBInt(t, db, "SELECT count(*) FROM external_accounts WHERE user_id=2", 1)
 	checkDBInt(t, db, "SELECT count(*) FROM sessions WHERE user_id=1", 1)
 	checkDBInt(t, db, "SELECT count(*) FROM account_recovery_codes", 0)
+}
+
+func TestMigrateV8AddsAuditWithoutBackfill(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chat.sqlite")
+	legacy, err := sqliteDatabase(path, "rwc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacy.Close()
+	if _, err := legacy.Exec(schemaV1 + migrateV1ToV2 + migrateV2ToV3 + migrateV3ToV4 + migrateV4ToV5 + migrateV5ToV6 + migrateV6ToV7 + migrateV7ToV8 + `
+INSERT INTO users(id,username,display_name,password,status) VALUES (1,'alice','Alice','fixture-hash','disabled'),
+  (2,'bob','Bob','fixture-hash','active'),(3,'carol','Carol','fixture-hash','recovery_required');
+INSERT INTO sessions VALUES (randomblob(32),2,9999999999);
+INSERT INTO account_recovery_codes VALUES (3,randomblob(32),9999999999);
+CREATE INDEX maintenance_audit_time ON users(status);
+`); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := openDB(path); err == nil {
+		next.Close()
+		t.Fatal("migration unexpectedly succeeded")
+	} else if !strings.Contains(err.Error(), "index maintenance_audit_time already exists") {
+		t.Fatal(err)
+	}
+	if _, err := ListMaintenanceAudit(t.Context(), path, 0, 50); err == nil || !strings.Contains(err.Error(), "数据库版本为 v8") {
+		t.Fatalf("audit command returned %v for old database", err)
+	}
+	checkDBInt(t, legacy, "PRAGMA user_version", 8)
+	checkDBInt(t, legacy, "SELECT count(*) FROM sqlite_schema WHERE name='maintenance_audit'", 0)
+	if _, err := legacy.Exec("DROP INDEX maintenance_audit_time"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := openDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	checkDBInt(t, db, "PRAGMA user_version", 9)
+	checkDBInt(t, db, "SELECT count(*) FROM maintenance_audit", 0)
+	checkDBInt(t, db, "SELECT count(*) FROM users WHERE status='disabled'", 1)
+	checkDBInt(t, db, "SELECT count(*) FROM sessions WHERE user_id=2", 1)
+	checkDBInt(t, db, "SELECT count(*) FROM account_recovery_codes WHERE user_id=3", 1)
 }
 
 func TestOpenDBInitializesCurrentSchemaAndRejectsUnknownVersion(t *testing.T) {

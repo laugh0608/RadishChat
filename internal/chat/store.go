@@ -16,7 +16,7 @@ const (
 	botSchemaVersion             = 4
 	botInstallationSchemaVersion = 5
 	accountStateSchemaVersion    = 8
-	currentSchemaVersion         = accountStateSchemaVersion
+	currentSchemaVersion         = 9
 )
 
 const schemaV1 = `
@@ -179,6 +179,19 @@ CREATE TABLE account_recovery_codes (
 PRAGMA user_version = 8;
 `
 
+const migrateV8ToV9 = `
+CREATE TABLE maintenance_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  occurred_at INTEGER NOT NULL,
+  source TEXT NOT NULL CHECK (source = 'maintenance_cli'),
+  action TEXT NOT NULL CHECK (action IN ('account.disable','account.issue-recovery','account.reopen')),
+  target_user_id INTEGER NOT NULL CHECK (target_user_id > 0),
+  result TEXT NOT NULL CHECK (result IN ('success','already_disabled'))
+);
+CREATE INDEX maintenance_audit_time ON maintenance_audit(occurred_at);
+PRAGMA user_version = 9;
+`
+
 func openDB(path string) (*sql.DB, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -243,6 +256,11 @@ func openDB(path string) (*sql.DB, error) {
 		case 7:
 			if _, err := tx.ExecContext(ctx, migrateV7ToV8); err != nil {
 				return fmt.Errorf("SQLite 从 v7 迁移到 v8 失败: %w", err)
+			}
+			fallthrough
+		case 8:
+			if _, err := tx.ExecContext(ctx, migrateV8ToV9); err != nil {
+				return fmt.Errorf("SQLite 从 v8 迁移到 v9 失败: %w", err)
 			}
 			return nil
 		case currentSchemaVersion:

@@ -62,20 +62,24 @@ func TestDisableLocalAccountRevokesSessionsAndGrants(t *testing.T) {
 	}
 	checkDBInt(t, i.s.db, "SELECT count(*) FROM sessions", 3)
 	checkDBInt(t, i.s.db, "SELECT count(*) FROM bot_installations", 4)
-	if _, err := i.s.db.Exec(`CREATE TRIGGER fixture_fail_disable BEFORE DELETE ON bot_installations
-		BEGIN SELECT RAISE(ABORT,'fixture blocked grant cleanup'); END`); err != nil {
-		t.Fatal(err)
-	}
-	if err := DisableLocalAccount(t.Context(), i.cfg.Database, account.ID); err == nil || !strings.Contains(err.Error(), "fixture blocked grant cleanup") {
-		t.Fatalf("failed suspension returned %v", err)
-	}
-	call(t, target, origin, "GET", "/me", nil, 200)
-	call(t, second, origin, "GET", "/me", nil, 200)
-	checkBotToken(t, origin, targetToken, 200, nil)
-	checkDBInt(t, i.s.db, "SELECT count(*) FROM account_recovery_codes", 1)
-	checkDBInt(t, i.s.db, "SELECT count(*) FROM bot_installations", 4)
-	if _, err := i.s.db.Exec("DROP TRIGGER fixture_fail_disable"); err != nil {
-		t.Fatal(err)
+	for _, failAt := range []string{"DELETE ON bot_installations", "INSERT ON maintenance_audit"} {
+		if _, err := i.s.db.Exec(`CREATE TRIGGER fixture_fail_disable BEFORE ` + failAt + `
+			BEGIN SELECT RAISE(ABORT,'fixture blocked suspension'); END`); err != nil {
+			t.Fatal(err)
+		}
+		if err := DisableLocalAccount(t.Context(), i.cfg.Database, account.ID); err == nil || !strings.Contains(err.Error(), "fixture blocked suspension") {
+			t.Fatalf("failed suspension returned %v", err)
+		}
+		call(t, target, origin, "GET", "/me", nil, 200)
+		call(t, second, origin, "GET", "/me", nil, 200)
+		checkBotToken(t, origin, targetToken, 200, nil)
+		checkDBInt(t, i.s.db, "SELECT count(*) FROM account_recovery_codes", 1)
+		checkDBInt(t, i.s.db, "SELECT count(*) FROM bot_installations", 4)
+		checkDBInt(t, i.s.db, "SELECT count(*) FROM bot_events", 2)
+		checkDBInt(t, i.s.db, "SELECT count(*) FROM maintenance_audit", 0)
+		if _, err := i.s.db.Exec("DROP TRIGGER fixture_fail_disable"); err != nil {
+			t.Fatal(err)
+		}
 	}
 
 	// Hold a real send after withUser succeeds, before its transaction can begin.

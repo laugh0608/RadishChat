@@ -2,7 +2,9 @@ package main
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
 	"log/slog"
 	"net"
@@ -98,8 +100,10 @@ func execute(args []string) error {
 		}
 	case len(args) == 3 && args[0] == "account":
 		return executeAccount(ctx, database, args[1], args[2])
+	case len(args) >= 2 && args[0] == "ops" && args[1] == "audit":
+		return executeAudit(ctx, database, args[2:])
 	default:
-		return errors.New("用法: radishchat [backup <备份文件> | restore <备份文件> | account <操作> <用户 ID>]")
+		return errors.New("用法: radishchat [backup <备份文件> | restore <备份文件> | account <操作> <用户 ID> | ops audit [--before ID] [--limit N]]")
 	}
 	return nil
 }
@@ -125,6 +129,29 @@ func executeAccount(ctx context.Context, database, action, userID string) error 
 		}
 	default:
 		return errors.New("用法: radishchat account <disable|issue-recovery|reopen> <用户 ID>")
+	}
+	return nil
+}
+
+func executeAudit(ctx context.Context, database string, args []string) error {
+	flags := flag.NewFlagSet("ops audit", flag.ContinueOnError)
+	before := flags.Int64("before", 0, "只查看编号小于此值的记录，0 表示从最新记录开始")
+	limit := flags.Int("limit", 50, "返回记录数，范围 1–200")
+	if err := flags.Parse(args); err != nil {
+		if errors.Is(err, flag.ErrHelp) {
+			return nil
+		}
+		return err
+	}
+	if flags.NArg() != 0 {
+		return errors.New("用法: radishchat ops audit [--before ID] [--limit N]")
+	}
+	entries, err := chat.ListMaintenanceAudit(ctx, database, *before, *limit)
+	if err != nil {
+		return fmt.Errorf("ops audit: %w", err)
+	}
+	if err := json.NewEncoder(os.Stdout).Encode(entries); err != nil {
+		return fmt.Errorf("输出维护审计: %w", err)
 	}
 	return nil
 }
