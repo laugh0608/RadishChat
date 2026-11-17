@@ -6,7 +6,7 @@
 
 ## 接下来的事项
 
-1. 评审 [AUTH-03 账号恢复、停用与注销](../topics/identity.md#auth-03) 的本地路径，确定首批覆盖的状态转换、合法恢复及停用后的会话撤销行为。
+1. AUTH-03 本地恢复与停用方案已确认。先实现账号状态与停用撤权，再实现一次性恢复与重新开放。[设计](../topics/identity.md#auth-03-local-design) · [AUTH-03-01](../topics/identity.md#auth-03-01) · [AUTH-03-02](../topics/identity.md#auth-03-02)
 2. 按 P2 阶段出口评审 [OPS-02 实例治理、诊断与隐私](../topics/deployment.md#ops-02) 的实施顺序，用 AUTH-03 的账号状态和撤权约定定义实例治理的操作与联合验收。[整体规划](../planning/project-plan.md#里程碑与阶段出口)
 
 ## 已有验收与待安排事项
