@@ -71,6 +71,10 @@ func validLabel(v string, limit int) bool {
 	return v != "" && utf8.RuneCountInString(v) <= limit && strings.IndexFunc(v, unicode.IsControl) < 0
 }
 
+func validPassword(password string) bool {
+	return len(password) <= 256 && utf8.RuneCountInString(password) >= 10
+}
+
 func passwordKey(password string, salt []byte) []byte {
 	return argon2.IDKey([]byte(password), salt, 3, 64*1024, 1, 32)
 }
@@ -186,7 +190,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		fail(w, 400, "用户名需为 3–32 个英文字母、数字或 ._-，以字母或数字开头，不能以 radish- 开头")
 		return
 	}
-	if !validLabel(p.DisplayName, 48) || utf8.RuneCountInString(p.Password) < 10 || len(p.Password) > 256 {
+	if !validLabel(p.DisplayName, 48) || !validPassword(p.Password) {
 		fail(w, 400, "昵称最多 48 字，密码至少 10 个字符且不超过 256 字节")
 		return
 	}

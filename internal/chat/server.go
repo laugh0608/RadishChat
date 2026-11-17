@@ -122,6 +122,7 @@ func (s *Server) routes() {
 	s.mux.HandleFunc("POST /api/v1/register", s.register)
 	s.mux.HandleFunc("POST /api/v1/login", s.login)
 	s.mux.HandleFunc("POST /api/v1/logout", s.logout)
+	s.mux.HandleFunc("POST /api/v1/auth/local/recover", s.recoverLocalAccount)
 	s.mux.HandleFunc("POST /api/v1/auth/radish/start", s.oidcStart)
 	s.mux.HandleFunc("GET /api/v1/auth/radish/callback", s.oidcCallback)
 	s.mux.HandleFunc("GET /api/v1/me", s.withUser(func(w http.ResponseWriter, _ *http.Request, u user) { reply(w, 200, u) }))

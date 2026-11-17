@@ -2,12 +2,11 @@
 
 更新日期 2026-11-17。
 
-**P2 群聊扩展与内测完善正在实施。** `BOT-01` 和 `BOT-02` 已通过本机验收。`AUTH-03-01` 账号状态与停用撤权已通过本机验收，开发分支的 SQLite 当前版本为 v8。[停用验收](../records/2026-11-17-account-disable.md) · [独立 Bot 接入验收](../records/2026-11-17-bot-independent-acceptance.md)
+**P2 群聊扩展与内测完善正在实施。** `BOT-01` 和 `BOT-02` 已通过本机验收。`AUTH-03` 首批本地路径已通过停用、恢复码、Web 密码重置和快照恢复联合验收，开发分支的 SQLite 当前版本为 v8。[恢复验收](../records/2026-11-17-account-recovery.md) · [停用验收](../records/2026-11-17-account-disable.md) · [独立 Bot 接入验收](../records/2026-11-17-bot-independent-acceptance.md)
 
 ## 接下来的事项
 
-1. 实现 `AUTH-03-02` 一次性恢复与重新开放，补齐维护 CLI 和 Web 恢复，联合复验停用、重签、快照恢复与重新登录。[设计](../topics/identity.md#auth-03-local-design) · [AUTH-03-02](../topics/identity.md#auth-03-02)
-2. 按 P2 阶段出口评审 [OPS-02 实例治理、诊断与隐私](../topics/deployment.md#ops-02) 的实施顺序，用 AUTH-03 的账号状态和撤权约定定义实例治理的操作与联合验收。[整体规划](../planning/project-plan.md#里程碑与阶段出口)
+1. 按 P2 阶段出口评审 `OPS-02` 实例治理的首批范围和实施顺序。用已验收的账号状态和撤权约定定义运营权限、操作审计、举报和数据处置的联合验收。[实例治理](../topics/deployment.md#ops-02) · [整体规划](../planning/project-plan.md#里程碑与阶段出口)
 
 ## 已有验收与待安排事项
 

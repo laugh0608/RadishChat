@@ -38,33 +38,59 @@ function ServerPicker() {
   </div>;
 }
 
+const accessCopy = {
+  login: {heading: '登录聊天', detail: '使用当前服务器的账号继续。', submit: '登录'},
+  register: {heading: '创建本地账号', detail: '账号只属于当前服务器。', submit: '注册并登录'},
+  recover: {heading: '重置本地密码', detail: '向当前服务器的维护者获取一次性恢复码。', submit: '重置密码'},
+};
+
 function Access({info, onLogin, onInfo}: {info: Info; onLogin: (a: Account) => void; onInfo: (info: Info) => void}) {
-  const [register, setRegister] = useState(false);
+  const [mode, setMode] = useState<keyof typeof accessCopy>('login');
   const [busy, setBusy] = useState(false);
+  const [notice, setNotice] = useState('');
   const [error, setError] = useState(() => {
     const key = new URLSearchParams(window.location.search).get('login');
     return key && Object.hasOwn(authErrors, key) ? authErrors[key] : '';
   });
+  const register = mode === 'register';
+  const recover = mode === 'recover';
+  const copy = accessCopy[mode];
   useEffect(() => { if (window.location.search) window.history.replaceState({}, '', '/'); }, []);
+  function showMode(next: typeof mode) {
+    setMode(next);
+    setError('');
+    setNotice('');
+  }
   async function submit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const values = Object.fromEntries(new FormData(e.currentTarget));
-    setBusy(true); setError('');
-    try { onLogin(await api<Account>(register ? '/register' : '/login', 'POST', values)); }
+    setBusy(true); setError(''); setNotice('');
+    try {
+      if (recover) {
+        await api<void>('/auth/local/recover', 'POST', {
+          ...values,
+          recoveryCode: String(values.recoveryCode ?? '').trim(),
+        });
+        setMode('login');
+        setNotice('密码已重置，请使用新密码登录。');
+      } else {
+        onLogin(await api<Account>(register ? '/register' : '/login', 'POST', values));
+      }
+    }
     catch (err) {
       setError(errorText(err));
       if (register && err instanceof RequestError && err.status === 403) {
         const current = await api<Info>('/info').catch(() => null);
         if (current) {
           onInfo(current);
-          if (!current.registration) setRegister(false);
+          if (!current.registration) setMode('login');
         }
       }
     }
     finally { setBusy(false); }
   }
   async function radishLogin() {
-    setBusy(true); setError('');
+    setBusy(true); setError(''); setNotice('');
     try {
       const {authorizationUrl} = await api<{authorizationUrl: string}>('/auth/radish/start', 'POST');
       window.location.assign(authorizationUrl);
@@ -81,18 +107,27 @@ function Access({info, onLogin, onInfo}: {info: Info; onLogin: (a: Account) => v
         <ServerPicker />
       </div>
       <section className="card access-card" aria-label="账号">
-        <h2>{register ? '创建本地账号' : '登录聊天'}</h2>
-        <p className="subtle">{register ? '账号只属于当前服务器。' : '使用当前服务器的账号继续。'}</p>
-        <form className="stack" key={String(register)} onSubmit={submit}>
+        <h2>{copy.heading}</h2>
+        <p className="subtle">{copy.detail}</p>
+        {notice && <p role="status">{notice}</p>}
+        <form className="stack" key={mode} onSubmit={submit}>
           <label>用户名<input name="username" autoComplete="username" required maxLength={32} placeholder="例如 radish_dev" /></label>
           {register && <label>昵称 <small>可选</small><input name="displayName" autoComplete="nickname" maxLength={48} placeholder="别人看到的名字" /></label>}
-          <label>密码<input name="password" type="password" autoComplete={register ? 'new-password' : 'current-password'} minLength={register ? 10 : undefined} required placeholder={register ? '至少 10 个字符' : '输入密码'}/></label>
+          {recover && <label>恢复码<input name="recoveryCode" type="password" autoComplete="off" required /></label>}
+          <label>{recover ? '新密码' : '密码'}<input name={recover ? 'newPassword' : 'password'} type="password"
+            autoComplete={mode === 'login' ? 'current-password' : 'new-password'} minLength={mode === 'login' ? undefined : 10}
+            required placeholder={mode === 'login' ? '输入密码' : '至少 10 个字符'} /></label>
           {register && info.registrationInviteRequired && <label>邀请码<input name="inviteCode" type="password" autoComplete="off" maxLength={48} required /></label>}
-          <button className="primary" disabled={busy}>{register ? '注册并登录' : '登录'}</button>
+          <button className="primary" disabled={busy}>{copy.submit}</button>
         </form>
-        {info.radishLogin && <button className="secondary full" disabled={busy} type="button" onClick={radishLogin}>使用 Radish 账号登录</button>}
+        {info.radishLogin && !recover && <button className="secondary full" disabled={busy} type="button" onClick={radishLogin}>使用 Radish 账号登录</button>}
         {error && <p role="alert" className="error">{error}</p>}
-        {info.registration && <button className="text-button" type="button" disabled={busy} onClick={() => {setRegister(!register);setError('');}}>{register ? '已有账号？返回登录' : '没有账号？在此服务器注册'}</button>}
+        <div className="row">
+          {mode === 'login' ? <>
+            <button className="text-button" type="button" disabled={busy} onClick={() => showMode('recover')}>忘记密码？</button>
+            {info.registration && <button className="text-button" type="button" disabled={busy} onClick={() => showMode('register')}>没有账号？在此服务器注册</button>}
+          </> : <button className="text-button" type="button" disabled={busy} onClick={() => showMode('login')}>返回登录</button>}
+        </div>
       </section>
     </div>
   </main>;

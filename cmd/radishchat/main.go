@@ -96,17 +96,35 @@ func execute(args []string) error {
 		if err := chat.CopyDatabase(ctx, args[1], database); err != nil {
 			return fmt.Errorf("restore: %w", err)
 		}
-	case len(args) == 3 && args[0] == "account" && args[1] == "disable":
-		id, err := strconv.ParseInt(args[2], 10, 64)
-		if err != nil || id <= 0 {
-			return errors.New("用户 ID 必须为正整数")
-		}
+	case len(args) == 3 && args[0] == "account":
+		return executeAccount(ctx, database, args[1], args[2])
+	default:
+		return errors.New("用法: radishchat [backup <备份文件> | restore <备份文件> | account <操作> <用户 ID>]")
+	}
+	return nil
+}
+
+func executeAccount(ctx context.Context, database, action, userID string) error {
+	id, err := strconv.ParseInt(userID, 10, 64)
+	if err != nil || id <= 0 {
+		return errors.New("用户 ID 必须为正整数")
+	}
+	switch action {
+	case "disable":
 		if err := chat.DisableLocalAccount(ctx, database, id); err != nil {
 			return fmt.Errorf("account disable: %w", err)
 		}
 		slog.Info("账号已停用", "user_id", id)
+	case "issue-recovery", "reopen":
+		code, err := chat.IssueLocalAccountRecovery(ctx, database, id, action == "reopen")
+		if err != nil {
+			return fmt.Errorf("account %s: %w", action, err)
+		}
+		if _, err := fmt.Fprintln(os.Stdout, code); err != nil {
+			return fmt.Errorf("输出恢复码: %w", err)
+		}
 	default:
-		return errors.New("用法: radishchat [backup <备份文件> | restore <备份文件> | account disable <用户 ID>]")
+		return errors.New("用法: radishchat account <disable|issue-recovery|reopen> <用户 ID>")
 	}
 	return nil
 }
