@@ -2,11 +2,12 @@
 
 更新日期 2026-11-17。
 
-**P2 首批功能已通过本机验收。** `BOT-01`、`BOT-02` 和 `AUTH-03` 已完成首批本地验证。`OPS-02` 完成维护审计、举报结案、受控导出及到期清理，并通过本机 HTTPS 双实例联合验收与旧快照恢复复验。当前实现的 SQLite 版本为 v11。[治理联合验收](../records/2026-11-17-governance-data.md) · [账号恢复验收](../records/2026-11-17-account-recovery.md) · [独立 Bot 接入验收](../records/2026-11-17-bot-independent-acceptance.md)
+**P2 候选 `fd6232d` 已通过本机联合验收。** 同一 Linux ARM64 镜像完成 HTTPS 双实例验证，覆盖独立 Bot 接入与撤权、账号恢复、举报停用、受控导出、到期清理、快照恢复及固定样本迁移至 SQLite v11。[P2 候选联合验收](../records/2026-11-17-p2-local-joint-acceptance.md)
 
 ## 接下来的事项
 
-1. 汇总 P2 阶段出口证据，核对候选构建、仓库门禁和受控内测放行安排。[阶段出口](../planning/project-plan.md#里程碑与阶段出口) · [仓库治理](../governance/repository.md)
+1. P2 稳定化。经维护者授权后推送 `dev`、发起 `dev → master` PR，等待 `Candidate Quality`，合并后回流 `dev`。[仓库治理](../governance/repository.md) · [稳定化与回流](../adr/0002-branch-pr-rulesets.md#稳定化与回流)
+2. 确认受控内测的目标实例、负责人和准入范围，部署后在目标环境复验 HTTPS、备份恢复和维护权限。[阶段出口](../planning/project-plan.md#里程碑与阶段出口) · [部署步骤](../../deploy/README.md)
 
 ## 已有验收与待安排事项
 
