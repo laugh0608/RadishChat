@@ -104,8 +104,10 @@ func execute(args []string) error {
 		return executeAudit(ctx, database, args[2:])
 	case len(args) >= 2 && args[0] == "ops" && args[1] == "reports":
 		return executeReports(ctx, database, args[2:])
+	case len(args) >= 2 && args[0] == "ops" && args[1] == "data":
+		return executeGovernanceData(ctx, database, args[2:])
 	default:
-		return errors.New("用法: radishchat [backup <备份文件> | restore <备份文件> | account <操作> <用户 ID> | ops audit | ops reports]")
+		return errors.New("用法: radishchat [backup <备份文件> | restore <备份文件> | account <操作> <用户 ID> | ops audit | ops reports | ops data]")
 	}
 	return nil
 }

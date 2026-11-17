@@ -77,10 +77,11 @@ func ListMessageReports(ctx context.Context, database, status string, before int
 	return reports, rows.Err()
 }
 
-func readMessageReport(ctx context.Context, tx *sql.Tx, id int64) (MessageReport, error) {
+func readMessageReport(ctx context.Context, tx *sql.Tx, id, replayClosedAt int64) (MessageReport, error) {
 	var report MessageReport
 	err := scanMessageReport(tx.QueryRowContext(ctx, `SELECT `+reportColumns+` FROM message_reports
-		WHERE id=? AND (closed_at IS NULL OR closed_at>?)`, id, time.Now().Add(-closedReportRetention).UnixMilli()), &report)
+		WHERE id=? AND (closed_at IS NULL OR closed_at>? OR closed_at=nullif(?,0))`,
+		id, time.Now().Add(-closedReportRetention).UnixMilli(), replayClosedAt), &report)
 	if errors.Is(err, sql.ErrNoRows) {
 		return MessageReport{}, fmt.Errorf("举报 %d 不存在或已超过留存期", id)
 	}
@@ -96,7 +97,7 @@ func ReviewMessageReport(ctx context.Context, database string, id int64) (Messag
 	}
 	defer db.Close()
 	err = transaction(ctx, db, func(tx *sql.Tx) error {
-		report, err := readMessageReport(ctx, tx, id)
+		report, err := readMessageReport(ctx, tx, id, 0)
 		if err != nil {
 			return err
 		}
@@ -122,6 +123,18 @@ func ReviewMessageReport(ctx context.Context, database string, id int64) (Messag
 
 // CloseMessageReport commits its decision, any account suspension, and both audit entries together.
 func CloseMessageReport(ctx context.Context, database string, id int64, decision string) (MessageReport, error) {
+	return closeMessageReport(ctx, database, id, decision, 0)
+}
+
+// ReplayMessageReportClosure reapplies a verified decision to a restored snapshot.
+func ReplayMessageReportClosure(ctx context.Context, database string, id int64, decision string, closedAt int64) (MessageReport, error) {
+	if closedAt <= 0 {
+		return MessageReport{}, errors.New("原结案时间须为正整数 Unix 毫秒")
+	}
+	return closeMessageReport(ctx, database, id, decision, closedAt)
+}
+
+func closeMessageReport(ctx context.Context, database string, id int64, decision string, originalClosedAt int64) (MessageReport, error) {
 	switch decision {
 	case ReportDismissed, ReportAccountDisabled, ReportReferred:
 	default:
@@ -134,9 +147,16 @@ func CloseMessageReport(ctx context.Context, database string, id int64, decision
 	defer db.Close()
 	var report MessageReport
 	err = transaction(ctx, db, func(tx *sql.Tx) error {
+		closedAt := time.Now().UnixMilli()
+		if originalClosedAt != 0 {
+			if originalClosedAt > closedAt {
+				return errors.New("原结案时间晚于当前时间")
+			}
+			closedAt = originalClosedAt
+		}
 		// Take the write lock before reading the report so competing operators see the committed decision.
 		result, err := tx.ExecContext(ctx, `UPDATE message_reports SET decision=?,closed_at=? WHERE id=? AND decision IS NULL`,
-			decision, time.Now().UnixMilli(), id)
+			decision, closedAt, id)
 		if err != nil {
 			return fmt.Errorf("结案举报: %w", err)
 		}
@@ -144,15 +164,21 @@ func CloseMessageReport(ctx context.Context, database string, id int64, decision
 		if err != nil {
 			return err
 		}
-		report, err = readMessageReport(ctx, tx, id)
+		report, err = readMessageReport(ctx, tx, id, originalClosedAt)
 		if err != nil {
 			return err
 		}
 		if count == 0 {
 			if report.Decision == decision {
+				if originalClosedAt != 0 && report.ClosedAt != originalClosedAt {
+					return errors.New("原结案时间与已有结案记录不一致")
+				}
 				return nil
 			}
 			return fmt.Errorf("举报 %d 无法改为所选结果，当前状态 %s，处理结果 %q", id, report.Status, report.Decision)
+		}
+		if originalClosedAt != 0 && originalClosedAt < report.CreatedAt {
+			return errors.New("原结案时间早于举报创建时间")
 		}
 
 		var authorUserID int64

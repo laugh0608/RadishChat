@@ -31,13 +31,23 @@ func executeReports(ctx context.Context, database string, args []string) error {
 			return errors.New("用法: radishchat ops reports list [--status open|closed] [--before ID] [--limit N]")
 		}
 		result, err = chat.ListMessageReports(ctx, database, *status, *before, *limit)
-	case len(args) == 2 && args[0] == "review", len(args) == 3 && args[0] == "close":
+	case len(args) == 2 && args[0] == "review", len(args) >= 3 && args[0] == "close":
 		id, err := strconv.ParseInt(args[1], 10, 64)
 		if err != nil || id <= 0 {
 			return errors.New("举报编号必须为正整数")
 		}
 		if args[0] == "review" {
 			return outputReport(chat.ReviewMessageReport(ctx, database, id))
+		}
+		if len(args) == 5 && args[3] == "--replay-closed-at" {
+			closedAt, err := strconv.ParseInt(args[4], 10, 64)
+			if err != nil || closedAt <= 0 {
+				return errors.New("原结案时间须为正整数 Unix 毫秒")
+			}
+			return outputReport(chat.ReplayMessageReportClosure(ctx, database, id, args[2], closedAt))
+		}
+		if len(args) != 3 {
+			return errors.New("用法: radishchat ops reports close <举报编号> <处理结果> [--replay-closed-at <原结案 Unix 毫秒>]")
 		}
 		return outputReport(chat.CloseMessageReport(ctx, database, id, args[2]))
 	default:

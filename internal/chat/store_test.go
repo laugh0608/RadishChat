@@ -127,10 +127,47 @@ CREATE INDEX message_reports_message ON users(status);
 		t.Fatal(err)
 	}
 	defer db.Close()
-	checkDBInt(t, db, "PRAGMA user_version", 10)
+	checkDBInt(t, db, "PRAGMA user_version", currentSchemaVersion)
 	checkDBInt(t, db, "SELECT count(*) FROM message_reports", 0)
 	checkDBInt(t, db, `SELECT count(*) FROM maintenance_audit WHERE id=17 AND occurred_at=123 AND action='account.disable'
 		AND source='maintenance_cli' AND target_user_id=42 AND result='already_disabled' AND report_id IS NULL`, 1)
+}
+
+func TestMigrateV10PreservesReportStateAndLinkedAudit(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chat.sqlite")
+	legacy, err := sqliteDatabase(path, "rwc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacy.Close()
+	if _, err := legacy.Exec(schemaV1 + migrateV1ToV2 + migrateV2ToV3 + migrateV3ToV4 + migrateV4ToV5 + migrateV5ToV6 + migrateV6ToV7 + migrateV7ToV8 + migrateV8ToV9 + migrateV9ToV10 + `
+INSERT INTO users(id,username,display_name) VALUES (1,'member','Member');
+INSERT INTO message_reports(id,room_id,reporter_user_id,reason,created_at,decision,closed_at)
+  VALUES (7,1,1,'spam',100,'dismissed',200);
+INSERT INTO maintenance_audit(id,occurred_at,source,action,report_id,result)
+  VALUES (17,200,'maintenance_cli','report.close',7,'dismissed');
+CREATE INDEX message_reports_closed_at ON users(username);
+`); err != nil {
+		t.Fatal(err)
+	}
+	if db, err := openDB(path); err == nil {
+		db.Close()
+		t.Fatal("migration unexpectedly succeeded")
+	}
+	checkDBInt(t, legacy, "PRAGMA user_version", 10)
+	checkDBInt(t, legacy, "SELECT count(*) FROM maintenance_audit WHERE report_id=7", 1)
+	if _, err := legacy.Exec("DROP INDEX message_reports_closed_at"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := openDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	checkDBInt(t, db, "PRAGMA user_version", 11)
+	checkDBInt(t, db, "SELECT count(*) FROM message_reports WHERE id=7 AND created_at=100 AND closed_at=200 AND decision='dismissed'", 1)
+	checkDBInt(t, db, `SELECT count(*) FROM maintenance_audit WHERE id=17 AND occurred_at=200 AND report_id=7
+		AND action='report.close' AND result='dismissed' AND reports_deleted IS NULL AND audit_deleted IS NULL`, 1)
 }
 
 func TestOpenDBInitializesCurrentSchemaAndRejectsUnknownVersion(t *testing.T) {

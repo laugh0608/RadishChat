@@ -16,7 +16,7 @@ const (
 	botSchemaVersion             = 4
 	botInstallationSchemaVersion = 5
 	accountStateSchemaVersion    = 8
-	currentSchemaVersion         = 10
+	currentSchemaVersion         = 11
 )
 
 const schemaV1 = `
@@ -224,6 +224,31 @@ CREATE INDEX maintenance_audit_time ON maintenance_audit(occurred_at);
 PRAGMA user_version = 10;
 `
 
+const migrateV10ToV11 = `
+CREATE INDEX message_reports_closed_at ON message_reports(closed_at) WHERE closed_at IS NOT NULL;
+ALTER TABLE maintenance_audit RENAME TO maintenance_audit_v10;
+CREATE TABLE maintenance_audit (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  occurred_at INTEGER NOT NULL,
+  source TEXT NOT NULL CHECK (source = 'maintenance_cli'),
+  action TEXT NOT NULL CHECK (action IN ('account.disable','account.issue-recovery','account.reopen',
+    'report.review','report.close','data.export','data.prune')),
+  target_user_id INTEGER CHECK (target_user_id > 0),
+  report_id INTEGER CHECK (report_id > 0),
+  result TEXT NOT NULL CHECK (result IN ('success','already_disabled','evidence_unavailable',
+    'dismissed','account_disabled','referred_to_group_owner')),
+  reports_deleted INTEGER CHECK (reports_deleted >= 0),
+  audit_deleted INTEGER CHECK (audit_deleted >= 0),
+  CHECK ((action='data.prune') = (reports_deleted IS NOT NULL)
+     AND (action='data.prune') = (audit_deleted IS NOT NULL))
+);
+INSERT INTO maintenance_audit(id,occurred_at,source,action,target_user_id,report_id,result)
+  SELECT id,occurred_at,source,action,target_user_id,report_id,result FROM maintenance_audit_v10;
+DROP TABLE maintenance_audit_v10;
+CREATE INDEX maintenance_audit_time ON maintenance_audit(occurred_at);
+PRAGMA user_version = 11;
+`
+
 func openDB(path string) (*sql.DB, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -298,6 +323,11 @@ func openDB(path string) (*sql.DB, error) {
 		case 9:
 			if _, err := tx.ExecContext(ctx, migrateV9ToV10); err != nil {
 				return fmt.Errorf("SQLite 从 v9 迁移到 v10 失败: %w", err)
+			}
+			fallthrough
+		case 10:
+			if _, err := tx.ExecContext(ctx, migrateV10ToV11); err != nil {
+				return fmt.Errorf("SQLite 从 v10 迁移到 v11 失败: %w", err)
 			}
 			return nil
 		case currentSchemaVersion:
