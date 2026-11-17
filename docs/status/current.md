@@ -1,14 +1,13 @@
 # 当前状态
 
-更新日期 2026-11-15。
+更新日期 2026-11-17。
 
-**P2 群聊扩展与内测完善正在实施。** `BOT-01` 已通过本机双实例验收。`BOT-02-01` 和 `BOT-02-02` 已通过本机验收，涵盖命令入队、短轮询、获授权的回复和 Web 群内展示。开发分支的 SQLite 当前版本为 v7。[命令事件验收](../records/2026-11-15-bot-command-delivery.md) · [Bot 回复验收](../records/2026-11-15-bot-command-replies.md)
+**P2 群聊扩展与内测完善正在实施。** `BOT-01` 和 `BOT-02` 已通过本机验收。Go 示例与独立 Python 客户端用公开 API 完成 `ping` → `pong`，本机双实例覆盖重启续读、回复去重、凭据轮换、撤权、备份恢复和重新安装。开发分支的 SQLite 当前版本为 v7。[独立 Bot 接入验收](../records/2026-11-17-bot-independent-acceptance.md)
 
 ## 接下来的事项
 
-1. 先完成 [BOT-02-03 示例 Bot 与独立接入](../topics/bots.md#bot-02-03)。交付可独立运行的 `ping` → `pong` 示例和配置、安装说明。按实例和安装持久化游标，仅在回复确认后推进。验证断线退避、限流等待、过期缺口和撤权后的停止行为。[事件 API](../api/v1.md#bot-command-events) · [回复 API](../api/v1.md#bot-command-replies)
-2. 在本机双实例用第二个独立实现的 Bot 复跑接入说明。核对重启续读、重复回复、凭据轮换、移除安装，以及备份恢复后重新签发和安装。将源码身份、操作步骤和实测结果写入验收记录。
-3. Bot 接入验收后，按 P2 阶段出口评审账号恢复、停用及实例治理的实施顺序。[整体规划](../planning/project-plan.md#里程碑与阶段出口) · [AUTH-03](../topics/identity.md#auth-03) · [OPS-02](../topics/deployment.md#ops-02)
+1. 评审 [AUTH-03 账号恢复、停用与注销](../topics/identity.md#auth-03) 的本地路径，确定首批覆盖的状态转换、合法恢复及停用后的会话撤销行为。
+2. 按 P2 阶段出口评审 [OPS-02 实例治理、诊断与隐私](../topics/deployment.md#ops-02) 的实施顺序，用 AUTH-03 的账号状态和撤权约定定义实例治理的操作与联合验收。[整体规划](../planning/project-plan.md#里程碑与阶段出口)
 
 ## 已有验收与待安排事项
 

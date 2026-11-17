@@ -2,7 +2,7 @@
 
 RadishChat 是 Radish 系列独立的在线即时通讯软件，专注日常私聊、小群聊天和 Markdown 消息。每个实例可以自部署并开放本地注册，也可配置 Radish 登录。当前采用 Go 服务端和 React Web，后续计划提供可连接用户指定实例的 Flutter 客户端。
 
-P1 已通过本机联合验收并合入稳定主线。P2 的 Bot 身份、群安装、命令事件和群内回复已在开发分支通过本机验收。[当前状态](docs/status/current.md)
+P1 已通过本机联合验收并合入稳定主线。P2 的 Bot 身份、群安装、命令事件、群内回复和独立接入已通过本机验收。[当前状态](docs/status/current.md) · [运行示例 Bot](examples/pingbot/README.md)
 
 | 要了解什么 | 从这里开始 |
 | --- | --- |
