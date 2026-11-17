@@ -63,30 +63,37 @@ func (s *Server) stream(w http.ResponseWriter, r *http.Request, u user) {
 		fail(w, 429, "实时连接过多")
 		return
 	}
+	token := s.sessionToken(r)
+	if _, err := sessionIdentity(r.Context(), s.db, token); err != nil {
+		userError(w, "start-stream", err)
+		return
+	}
 	w.Header().Set("Content-Type", "text/event-stream")
 	w.Header().Set("X-Accel-Buffering", "no")
 	control := http.NewResponseController(w)
 	write := func(v string) bool {
 		_ = control.SetWriteDeadline(time.Now().Add(5 * time.Second))
-		_, err := fmt.Fprint(w, v)
-		return err == nil && control.Flush() == nil
+		if _, err := fmt.Fprint(w, v); err != nil || control.Flush() != nil {
+			return false
+		}
+		_ = control.SetWriteDeadline(time.Time{})
+		return true
 	}
 	if !write("retry: 2500\nevent: sync\ndata: {}\n\n") {
 		return
 	}
 	check := time.NewTicker(15 * time.Second)
 	defer check.Stop()
-	token := s.sessionToken(r)
 	for {
 		select {
 		case <-r.Context().Done():
 			return
 		case <-ch:
-			if _, err := s.identity(r.Context(), token); err != nil || !write("event: sync\ndata: {}\n\n") {
+			if _, err := sessionIdentity(r.Context(), s.db, token); err != nil || !write("event: sync\ndata: {}\n\n") {
 				return
 			}
 		case <-check.C:
-			if _, err := s.identity(r.Context(), token); err != nil || !write(": keepalive\n\n") {
+			if _, err := sessionIdentity(r.Context(), s.db, token); err != nil || !write(": keepalive\n\n") {
 				return
 			}
 		}

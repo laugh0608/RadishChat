@@ -15,6 +15,47 @@ func checkDBInt(t *testing.T, db *sql.DB, query string, want int) {
 	}
 }
 
+func TestMigrateV7PreservesAccountsAndRollsBackOnIndexConflict(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "chat.sqlite")
+	legacy, err := sqliteDatabase(path, "rwc")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer legacy.Close()
+	if _, err := legacy.Exec(schemaV1 + migrateV1ToV2 + migrateV2ToV3 + migrateV3ToV4 + migrateV4ToV5 + migrateV5ToV6 + migrateV6ToV7 + `
+INSERT INTO users(id,username,display_name,password) VALUES (1,'alice','Alice','fixture-hash'),(2,'radish-peer','Peer',NULL);
+INSERT INTO external_accounts VALUES ('fixture-issuer','fixture-subject',2);
+INSERT INTO sessions VALUES (randomblob(32),1,9999999999);
+CREATE INDEX sessions_user ON sessions(expires);
+`); err != nil {
+		t.Fatal(err)
+	}
+	if next, err := openDB(path); err == nil {
+		next.Close()
+		t.Fatal("migration unexpectedly succeeded")
+	} else if !strings.Contains(err.Error(), "index sessions_user already exists") {
+		t.Fatal(err)
+	}
+	checkDBInt(t, legacy, "PRAGMA user_version", 7)
+	checkDBInt(t, legacy, "SELECT count(*) FROM pragma_table_info('users') WHERE name='status'", 0)
+	checkDBInt(t, legacy, "SELECT count(*) FROM sqlite_schema WHERE name='account_recovery_codes'", 0)
+	checkDBInt(t, legacy, "SELECT count(*) FROM sessions", 1)
+	if _, err := legacy.Exec("DROP INDEX sessions_user"); err != nil {
+		t.Fatal(err)
+	}
+	db, err := openDB(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer db.Close()
+	checkDBInt(t, db, "PRAGMA user_version", 8)
+	checkDBInt(t, db, "SELECT count(*) FROM users WHERE status='active'", 2)
+	checkDBInt(t, db, "SELECT count(*) FROM users WHERE id=1 AND password='fixture-hash'", 1)
+	checkDBInt(t, db, "SELECT count(*) FROM external_accounts WHERE user_id=2", 1)
+	checkDBInt(t, db, "SELECT count(*) FROM sessions WHERE user_id=1", 1)
+	checkDBInt(t, db, "SELECT count(*) FROM account_recovery_codes", 0)
+}
+
 func TestOpenDBInitializesCurrentSchemaAndRejectsUnknownVersion(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "chat.sqlite")
 	db, err := openDB(path)

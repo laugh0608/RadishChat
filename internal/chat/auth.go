@@ -21,6 +21,8 @@ import (
 
 var usernamePattern = regexp.MustCompile(`^[a-z0-9][a-z0-9_.-]{2,31}$`)
 var inviteCodePattern = regexp.MustCompile(`^[a-f0-9]{48}$`)
+var errSessionInvalid = errors.New("session is missing, expired, or revoked")
+var errAccountUnavailable = errors.New("account cannot start a session")
 
 type RegistrationMode string
 
@@ -204,7 +206,7 @@ func (s *Server) register(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return err
 		}
-		return insertSession(r.Context(), tx, u.ID, token)
+		return insertSession(r.Context(), tx, u.ID, token, nil)
 	})
 	if recordConflict(err) {
 		fail(w, 409, "用户名已被使用")
@@ -236,7 +238,8 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	}
 	var u user
 	var hash sql.NullString
-	err := s.db.QueryRowContext(r.Context(), "SELECT id, username, display_name, password FROM users WHERE username=?", key).Scan(&u.ID, &u.Username, &u.DisplayName, &hash)
+	err := s.db.QueryRowContext(r.Context(), `SELECT id,username,display_name,password FROM users
+		WHERE username=? AND status='active'`, key).Scan(&u.ID, &u.Username, &u.DisplayName, &hash)
 	if err != nil && !errors.Is(err, sql.ErrNoRows) {
 		<-s.gate
 		internal(w, "login", err)
@@ -255,8 +258,12 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		return insertSession(r.Context(), tx, u.ID, token)
+		return insertSession(r.Context(), tx, u.ID, token, &hash.String)
 	})
+	if errors.Is(err, errAccountUnavailable) {
+		fail(w, 401, "用户名或密码不正确")
+		return
+	}
 	if err != nil {
 		internal(w, "login-session", err)
 		return
@@ -265,12 +272,21 @@ func (s *Server) login(w http.ResponseWriter, r *http.Request) {
 	reply(w, 200, u)
 }
 
-func insertSession(ctx context.Context, tx *sql.Tx, id int64, token string) error {
+func insertSession(ctx context.Context, tx *sql.Tx, id int64, token string, expectedPasswordHash *string) error {
 	now := time.Now()
 	if _, err := tx.ExecContext(ctx, "DELETE FROM sessions WHERE expires <= ?", now.Unix()); err != nil {
 		return err
 	}
-	_, err := tx.ExecContext(ctx, "INSERT INTO sessions VALUES (?,?,?)", digest(token), id, now.Add(sessionAge).Unix())
+	res, err := tx.ExecContext(ctx, `INSERT INTO sessions(token_hash,user_id,expires)
+		SELECT ?,id,? FROM users WHERE id=? AND status='active' AND (? IS NULL OR password=?)`,
+		digest(token), now.Add(sessionAge).Unix(), id, expectedPasswordHash, expectedPasswordHash)
+	if err != nil {
+		return err
+	}
+	count, err := res.RowsAffected()
+	if err == nil && count == 0 {
+		return errAccountUnavailable
+	}
 	return err
 }
 
@@ -312,27 +328,49 @@ func (s *Server) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(204)
 }
 
-func (s *Server) identity(ctx context.Context, token string) (user, error) {
+func sessionIdentity(ctx context.Context, db rowQuerier, token string) (user, error) {
 	var u user
 	if token == "" {
-		return u, sql.ErrNoRows
+		return u, errSessionInvalid
 	}
-	err := s.db.QueryRowContext(ctx, `SELECT u.id,u.username,u.display_name FROM sessions s JOIN users u ON u.id=s.user_id
-		WHERE s.token_hash=? AND s.expires>?`, digest(token), time.Now().Unix()).Scan(&u.ID, &u.Username, &u.DisplayName)
+	err := db.QueryRowContext(ctx, `SELECT u.id,u.username,u.display_name FROM sessions s JOIN users u ON u.id=s.user_id
+		WHERE s.token_hash=? AND s.expires>? AND u.status='active'`, digest(token), time.Now().Unix()).Scan(&u.ID, &u.Username, &u.DisplayName)
+	if errors.Is(err, sql.ErrNoRows) {
+		return u, errSessionInvalid
+	}
 	return u, err
 }
 
 func (s *Server) withUser(next func(http.ResponseWriter, *http.Request, user)) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		u, err := s.identity(r.Context(), s.sessionToken(r))
-		if errors.Is(err, sql.ErrNoRows) {
-			fail(w, 401, "请先登录")
-			return
-		}
+		u, err := sessionIdentity(r.Context(), s.db, s.sessionToken(r))
 		if err != nil {
-			internal(w, "session", err)
+			userError(w, "session", err)
 			return
 		}
 		next(w, r, u)
 	}
+}
+
+func (s *Server) userTransaction(r *http.Request, userID int64, body func(*sql.Tx) error) error {
+	ctx := r.Context()
+	return transaction(ctx, s.db, func(tx *sql.Tx) error {
+		// A session may have been revoked while the handler was parsing its input.
+		current, err := sessionIdentity(ctx, tx, s.sessionToken(r))
+		if err != nil {
+			return err
+		}
+		if current.ID != userID {
+			return errSessionInvalid
+		}
+		return body(tx)
+	})
+}
+
+func userError(w http.ResponseWriter, operation string, err error) {
+	if errors.Is(err, errSessionInvalid) {
+		fail(w, 401, "请先登录")
+		return
+	}
+	internal(w, operation, err)
 }

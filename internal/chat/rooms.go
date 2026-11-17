@@ -60,30 +60,31 @@ type messagePage struct {
 }
 
 func (s *Server) listRooms(w http.ResponseWriter, r *http.Request, u user) {
-	rows, err := s.db.QueryContext(r.Context(), `
-		SELECT r.id,r.kind,coalesce(peer.display_name,r.name),coalesce(peer.username,''),coalesce(r.owner_id,0),
-			(SELECT count(*) FROM members WHERE room_id=r.id),
-			coalesce((SELECT id FROM messages WHERE room_id=r.id AND id>m.joined_after_message_id ORDER BY id DESC LIMIT 1),0) AS last,
-			m.membership_id
-		FROM members m JOIN rooms r ON r.id=m.room_id
-		LEFT JOIN users peer ON peer.id=CASE WHEN r.direct_a=m.user_id THEN r.direct_b ELSE r.direct_a END
-		WHERE m.user_id=? ORDER BY last DESC,r.id DESC`, u.ID)
-	if err != nil {
-		internal(w, "list-rooms", err)
-		return
-	}
-	defer rows.Close()
 	result := make([]room, 0)
-	for rows.Next() {
-		var c room
-		if err := rows.Scan(&c.ID, &c.Kind, &c.Name, &c.PeerUsername, &c.OwnerID, &c.MemberCount, &c.LastMessageID, &c.MembershipID); err != nil {
-			internal(w, "room-row", err)
-			return
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(r.Context(), `
+			SELECT r.id,r.kind,coalesce(peer.display_name,r.name),coalesce(peer.username,''),coalesce(r.owner_id,0),
+				(SELECT count(*) FROM members WHERE room_id=r.id),
+				coalesce((SELECT id FROM messages WHERE room_id=r.id AND id>m.joined_after_message_id ORDER BY id DESC LIMIT 1),0) AS last,
+				m.membership_id
+			FROM members m JOIN rooms r ON r.id=m.room_id
+			LEFT JOIN users peer ON peer.id=CASE WHEN r.direct_a=m.user_id THEN r.direct_b ELSE r.direct_a END
+			WHERE m.user_id=? ORDER BY last DESC,r.id DESC`, u.ID)
+		if err != nil {
+			return err
 		}
-		result = append(result, c)
-	}
-	if err := rows.Err(); err != nil {
-		internal(w, "room-rows", err)
+		defer rows.Close()
+		for rows.Next() {
+			var c room
+			if err := rows.Scan(&c.ID, &c.Kind, &c.Name, &c.PeerUsername, &c.OwnerID, &c.MemberCount, &c.LastMessageID, &c.MembershipID); err != nil {
+				return err
+			}
+			result = append(result, c)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		userError(w, "list-rooms", err)
 		return
 	}
 	reply(w, 200, result)
@@ -112,7 +113,7 @@ func (s *Server) directRoom(w http.ResponseWriter, r *http.Request, u user) {
 	}
 	ctx := r.Context()
 	var id, other int64
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		var err error
 		other, err = findUser(ctx, tx, input.Username)
 		if err != nil {
@@ -135,7 +136,7 @@ func (s *Server) directRoom(w http.ResponseWriter, r *http.Request, u user) {
 		return
 	}
 	if err != nil {
-		internal(w, "direct-room", err)
+		userError(w, "direct-room", err)
 		return
 	}
 	s.events.notify(u.ID, other)
@@ -158,7 +159,7 @@ func (s *Server) groupRoom(w http.ResponseWriter, r *http.Request, u user) {
 	ctx := r.Context()
 	var id int64
 	people := []int64{u.ID}
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		seen := map[int64]bool{u.ID: true}
 		for _, name := range input.Usernames {
 			member, err := findUser(ctx, tx, name)
@@ -191,7 +192,7 @@ func (s *Server) groupRoom(w http.ResponseWriter, r *http.Request, u user) {
 		return
 	}
 	if err != nil {
-		internal(w, "group-room", err)
+		userError(w, "group-room", err)
 		return
 	}
 	s.events.notify(people...)
@@ -230,7 +231,7 @@ func roomError(w http.ResponseWriter, op string, err error) {
 	case errors.Is(err, errRequestConflict):
 		fail(w, 409, "发送标识已被使用")
 	default:
-		internal(w, op, err)
+		userError(w, op, err)
 	}
 }
 
@@ -255,7 +256,7 @@ func (s *Server) listMembers(w http.ResponseWriter, r *http.Request, u user) {
 	ctx := r.Context()
 	rid := intID(r.PathValue("room"))
 	list := make([]user, 0)
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		if _, err := access(r, tx, rid, u.ID); err != nil {
 			return err
 		}
@@ -291,7 +292,7 @@ func (s *Server) addMember(w http.ResponseWriter, r *http.Request, u user) {
 	ctx := r.Context()
 	rid := intID(r.PathValue("room"))
 	var people []int64
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		current, err := access(r, tx, rid, u.ID)
 		if err != nil {
 			return err
@@ -332,7 +333,7 @@ func (s *Server) removeMember(w http.ResponseWriter, r *http.Request, u user) {
 	ctx := r.Context()
 	rid, member := intID(r.PathValue("room")), intID(r.PathValue("member"))
 	var people []int64
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		current, err := access(r, tx, rid, u.ID)
 		if err != nil {
 			return err
@@ -374,7 +375,7 @@ func (s *Server) listMessages(w http.ResponseWriter, r *http.Request, u user) {
 		return
 	}
 	out := messagePage{Messages: make([]message, 0)}
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		current, err := access(r, tx, rid, u.ID)
 		if err != nil {
 			return err
@@ -447,7 +448,7 @@ func (s *Server) sendMessage(w http.ResponseWriter, r *http.Request, u user) {
 	}
 	m := message{Author: u, Markdown: input.Markdown, SentAt: time.Now().UnixMilli()}
 	var people []int64
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		current, err := access(r, tx, rid, u.ID)
 		if err != nil {
 			return err
@@ -490,7 +491,7 @@ func (s *Server) leaveGroup(w http.ResponseWriter, r *http.Request, u user) {
 	ctx := r.Context()
 	rid := intID(r.PathValue("room"))
 	var people []int64
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		current, err := access(r, tx, rid, u.ID)
 		if err != nil {
 			return err

@@ -16,11 +16,23 @@ docker image inspect --format '{{.Id}} {{.Os}}/{{.Architecture}}' radishchat:p1-
 - 只在确认应用实际收到的 TCP 对端 IP 是直接反向代理、且代理只传递一个可信客户端地址时，设置 `RADISHCHAT_TRUSTED_PROXY_IP`。宿主机反代经过 Docker 端口转发时，对端可能是 Docker 网关。未设置时，速率限制按应用看到的对端 IP 计数，该代理后的客户端可能共享限额。
 - 镜像以 UID `10001` 运行，健康检查访问容器内 `/healthz`。新命名卷的 `/data` 为 `0700`，SQLite 文件为 `0600`。已有卷升级时保留原权限，部署者应检查卷的属主和模式。Docker 管理员可访问命名卷和容器环境变量，应限制 Docker 管理权限。收集诊断资料时保护环境文件、Cookie、邀请码和 SQLite 数据。
 
+<a id="local-account-disable"></a>
+
+## 本地账号停用
+
+在隔离验收实例中，核对目标实例和本地账号的数字 `id`。账号本人可从 `/api/v1/me` 核对 ID，群内可用获授权的成员接口核对。使用与运行实例版本一致并拥有数据卷权限的账号执行。Compose 方式从该实例的安装目录运行，示例中的 `42` 替换为目标 ID。
+
+```sh
+docker compose --env-file instance.env exec -T chat radishchat account disable 42
+```
+
+直接运行二进制时，使 `RADISHCHAT_DATABASE` 指向目标实例现有的 v8 数据库，再执行 `radishchat account disable 42`。服务可以继续运行。操作成功后，目标账号的旧会话、恢复码及其 Bot 的凭据和安装失效，既有消息和成员关系保留。重复停用同一账号可安全执行。版本不匹配或目标不适用时命令报错，数据库繁忙时可重试。解除停用和密码重置由 `AUTH-03-02` 交付，两项联合验收后用于内测账号。[停用合同](../docs/topics/identity.md#auth-03-local-design)
+
 <a id="sqlite-backup-restore"></a>
 
 ## SQLite 备份、恢复与升级回退
 
-候选镜像中的 `radishchat backup <备份文件>` 从 `RADISHCHAT_DATABASE` 生成快照，`radishchat restore <备份文件>` 向该变量指定的新路径恢复。命令可读取 v1 至 v7 并保留原库版本，检查 SQLite 完整性和外键，清除副本内的登录会话与未完成的 OIDC 流程。v4 起副本保留 Bot 定义及所有者，清除 Bot 凭据摘要。v5 起也清除待审批和生效的安装，v6 的待交付命令事件与去重摘要随安装清除。v7 已发送的 Bot 回复和作者身份随群历史保留。恢复后由 Bot 所有者重新签发凭据，群主按需重新安装，Bot 使用新安装的游标。目标使用受保护的本地目录和 `0600` 的文件。命令拒绝覆盖现有数据库及其 SQLite 辅助文件。正常重启沿用原卷内的登录会话、Bot 凭据、安装及有效事件。[Bot 群安装 API](../docs/api/v1.md#bot-installations) · [Bot 回复 API](../docs/api/v1.md#bot-command-replies)
+候选镜像中的 `radishchat backup <备份文件>` 从 `RADISHCHAT_DATABASE` 生成快照，`radishchat restore <备份文件>` 向该变量指定的新路径恢复。命令可读取 v1 至 v8 并保留原库版本，检查 SQLite 完整性和外键，清除副本内的登录会话与未完成的 OIDC 流程。v4 起副本保留 Bot 定义及所有者，清除 Bot 凭据摘要。v5 起也清除待审批和生效的安装，v6 起的待交付命令事件与去重摘要随安装清除。v7 起已发送的 Bot 回复和作者身份随群历史保留。v8 副本保留快照中的账号状态和密码散列，清除恢复码。恢复后由 Bot 所有者重新签发凭据，群主按需重新安装，Bot 使用新安装的游标。目标使用受保护的本地目录和 `0600` 的文件。命令拒绝覆盖现有数据库及其 SQLite 辅助文件。正常重启沿用原卷内的账号状态、有效会话、Bot 凭据、安装及有效事件。[账号恢复设计](../docs/topics/identity.md#auth-03-local-design) · [Bot 群安装 API](../docs/api/v1.md#bot-installations)
 
 在源实例的安装目录停止应用，将数据卷以只读方式交给带维护命令的候选镜像。备份仍含账号、密码散列、成员和消息正文。单独保存备份记录和原版本镜像标识，限制备份目录和副本的访问权限。
 
@@ -60,7 +72,7 @@ docker run --rm -i --network none --volumes-from "$target_container" \
 recovery_compose up -d --no-build --wait
 ```
 
-只在 `restore` 成功后启动新实例。确认旧会话访问 `/api/v1/me` 返回 401，然后重新登录，核对账号、群成员和历史消息。使用 Bot 的实例还应核对历史回复仍显示原作者，确认旧凭据访问 `/api/v1/bot/me` 返回 401。重新签发并安装后，Bot 使用新安装的游标读取后续命令。将确认通过的实例接回反代入口。备份保存在长期受保护的存储中，按实例的数据留存要求管理。[Bot Web 操作](../docs/topics/bots.md#bot-01-web)
+只在 `restore` 成功后启动新实例。确认旧会话访问 `/api/v1/me` 返回 401，然后用可用账号重新登录，核对账号、群成员和历史消息。开放给成员前，对照快照之后的停用记录，在恢复实例重新应用仍然有效的停用。使用 Bot 的实例还应核对历史回复仍显示原作者，确认旧凭据访问 `/api/v1/bot/me` 返回 401。重新签发并安装后，Bot 使用新安装的游标读取后续命令。将确认通过的实例接回反代入口。备份保存在长期受保护的存储中，按实例的数据留存要求管理。[本地账号停用](#local-account-disable) · [Bot Web 操作](../docs/topics/bots.md#bot-01-web)
 
 ## 双实例验收
 

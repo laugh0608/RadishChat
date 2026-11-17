@@ -41,6 +41,11 @@ func TestDatabaseBackupAndRestoreInvalidateAuthentication(t *testing.T) {
 	if _, err := original.s.db.Exec("INSERT INTO oidc_flows VALUES ('state', x'01', 'nonce', 'verifier', 9999999999)"); err != nil {
 		t.Fatal(err)
 	}
+	if _, err := original.s.db.Exec(`INSERT INTO users(id,username,display_name,password,status)
+		VALUES (3,'locked','Locked','fixture-hash','recovery_required'),(4,'suspended','Suspended','fixture-hash','disabled');
+		INSERT INTO account_recovery_codes VALUES (3,randomblob(32),9999999999);`); err != nil {
+		t.Fatal(err)
+	}
 	original.host.Close()
 	if err := original.s.Close(); err != nil {
 		t.Fatal(err)
@@ -67,11 +72,13 @@ func TestDatabaseBackupAndRestoreInvalidateAuthentication(t *testing.T) {
 		checkDBInt(t, db, "SELECT count(*) FROM members", 3)
 		checkDBInt(t, db, "SELECT count(*) FROM bots", 1)
 		if input == source {
+			checkDBInt(t, db, "SELECT count(*) FROM account_recovery_codes", 1)
 			checkDBInt(t, db, "SELECT count(*) FROM sessions", 2)
 			checkDBInt(t, db, "SELECT count(*) FROM oidc_flows", 1)
 			checkDBInt(t, db, "SELECT count(*) FROM bots WHERE token_hash IS NOT NULL", 1)
 			checkDBInt(t, db, "SELECT count(*) FROM bot_installations", 2)
 		} else {
+			checkDBInt(t, db, "SELECT count(*) FROM account_recovery_codes", 0)
 			checkDBInt(t, db, "SELECT count(*) FROM sessions", 0)
 			checkDBInt(t, db, "SELECT count(*) FROM oidc_flows", 0)
 			checkDBInt(t, db, "SELECT count(*) FROM bots WHERE token_hash IS NOT NULL", 0)
@@ -96,6 +103,9 @@ func TestDatabaseBackupAndRestoreInvalidateAuthentication(t *testing.T) {
 			c.Jar.SetCookies(restoredURL, cookies)
 			checkDBInt(t, restored.s.db, "SELECT count(*) FROM oidc_flows", 0)
 			checkDBInt(t, restored.s.db, "SELECT count(*) FROM bot_installations", 0)
+			checkDBInt(t, restored.s.db, "SELECT count(*) FROM account_recovery_codes", 0)
+			checkDBInt(t, restored.s.db, "SELECT count(*) FROM users WHERE id=3 AND status='recovery_required'", 1)
+			checkDBInt(t, restored.s.db, "SELECT count(*) FROM users WHERE id=4 AND status='disabled'", 1)
 			call(t, c, restored.host.URL, "GET", "/me", nil, http.StatusUnauthorized)
 			checkBotToken(t, restored.host.URL, botToken, http.StatusUnauthorized, nil)
 			call(t, c, restored.host.URL, "POST", "/login", credentials{Username: "bob", Password: "fixture-only-password"}, 200)

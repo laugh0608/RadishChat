@@ -89,7 +89,7 @@ func (s *Server) listGroupBotInstallations(w http.ResponseWriter, r *http.Reques
 	roomID := intID(r.PathValue("room"))
 	includePending := r.URL.Query().Get("includePending") == "1"
 	installations := []botInstallationPreview{}
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		member, err := botGroupMembership(r, tx, roomID, u.ID)
 		if err != nil {
 			return err
@@ -147,7 +147,7 @@ func (s *Server) groupBotInstallation(w http.ResponseWriter, r *http.Request, u 
 	roomID := intID(r.PathValue("room"))
 	var view botInstallationPreview
 	view.BotID = r.PathValue("bot")
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		member, err := botGroupMembership(r, tx, roomID, u.ID)
 		if err != nil {
 			return err
@@ -160,8 +160,9 @@ func (s *Server) groupBotInstallation(w http.ResponseWriter, r *http.Request, u 
 		var permissions botCommandPermissions
 		err = tx.QueryRowContext(ctx, `SELECT b.display_name,b.owner_id,
 			coalesce(i.id,''),coalesce(i.state,'available'),coalesce(i.commands_receive,0),coalesce(i.commands_reply,0)
-			FROM bots b LEFT JOIN bot_installations i ON i.bot_id=b.id AND i.room_id=?
-			WHERE b.id=?`, roomID, view.BotID).
+			FROM bots b JOIN users owner ON owner.id=b.owner_id
+			LEFT JOIN bot_installations i ON i.bot_id=b.id AND i.room_id=?
+			WHERE b.id=? AND owner.status<>'disabled'`, roomID, view.BotID).
 			Scan(&view.DisplayName, &botOwnerID, &view.InstallationID, &view.State, &permissions.receive, &permissions.reply)
 		if err != nil {
 			return err
@@ -199,7 +200,7 @@ func (s *Server) listOwnedBotInstallations(w http.ResponseWriter, r *http.Reques
 	ctx := r.Context()
 	botID := r.PathValue("bot")
 	installations := []ownedBotInstallation{}
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		var owned string
 		if err := tx.QueryRowContext(ctx, "SELECT id FROM bots WHERE id=? AND owner_id=?", botID, u.ID).Scan(&owned); err != nil {
 			return err
@@ -231,25 +232,19 @@ func (s *Server) listOwnedBotInstallations(w http.ResponseWriter, r *http.Reques
 }
 
 func (s *Server) approveBotInstallation(w http.ResponseWriter, r *http.Request, u user) {
-	result, err := s.db.ExecContext(r.Context(), `UPDATE bot_installations SET state='active' WHERE id=(
-		SELECT i.id FROM bot_installations i
-		JOIN bots b ON b.id=i.bot_id
-		JOIN rooms r ON r.id=i.room_id AND r.kind='group'
-		LEFT JOIN members requester ON requester.room_id=i.room_id AND requester.user_id=i.requested_by
-		WHERE i.id=? AND i.bot_id=? AND b.owner_id=?
-		  AND (i.state='active' OR (r.owner_id=i.requested_by AND requester.user_id IS NOT NULL))
-	)`, r.PathValue("installation"), r.PathValue("bot"), u.ID)
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
+		var id string
+		return tx.QueryRowContext(r.Context(), `UPDATE bot_installations SET state='active' WHERE id=(
+			SELECT i.id FROM bot_installations i
+			JOIN bots b ON b.id=i.bot_id
+			JOIN rooms r ON r.id=i.room_id AND r.kind='group'
+			LEFT JOIN members requester ON requester.room_id=i.room_id AND requester.user_id=i.requested_by
+			WHERE i.id=? AND i.bot_id=? AND b.owner_id=?
+			  AND (i.state='active' OR (r.owner_id=i.requested_by AND requester.user_id IS NOT NULL))
+		) RETURNING id`, r.PathValue("installation"), r.PathValue("bot"), u.ID).Scan(&id)
+	})
 	if err != nil {
 		botError(w, "approve-bot-installation", err)
-		return
-	}
-	updated, err := result.RowsAffected()
-	if err != nil {
-		botError(w, "approve-bot-installation", err)
-		return
-	}
-	if updated == 0 {
-		botError(w, "approve-bot-installation", errMissing)
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
@@ -258,7 +253,7 @@ func (s *Server) approveBotInstallation(w http.ResponseWriter, r *http.Request, 
 func (s *Server) removeBotInstallation(w http.ResponseWriter, r *http.Request, u user) {
 	ctx := r.Context()
 	installationID := r.PathValue("installation")
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		var roomID, botOwnerID int64
 		var state string
 		err := tx.QueryRowContext(ctx, `SELECT i.room_id,b.owner_id,i.state

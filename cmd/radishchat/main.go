@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"syscall"
 	"time"
@@ -83,17 +84,29 @@ func execute(args []string) error {
 	if len(args) == 0 {
 		return run()
 	}
-	if len(args) != 2 || (args[0] != "backup" && args[0] != "restore") || args[1] == "" {
-		return errors.New("用法: radishchat [backup <备份文件> | restore <备份文件>]")
-	}
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer stop()
-	source, target := env("RADISHCHAT_DATABASE", defaultDatabase), args[1]
-	if args[0] == "restore" {
-		source, target = target, source
-	}
-	if err := chat.CopyDatabase(ctx, source, target); err != nil {
-		return fmt.Errorf("%s: %w", args[0], err)
+	database := env("RADISHCHAT_DATABASE", defaultDatabase)
+	switch {
+	case len(args) == 2 && args[0] == "backup" && args[1] != "":
+		if err := chat.CopyDatabase(ctx, database, args[1]); err != nil {
+			return fmt.Errorf("backup: %w", err)
+		}
+	case len(args) == 2 && args[0] == "restore" && args[1] != "":
+		if err := chat.CopyDatabase(ctx, args[1], database); err != nil {
+			return fmt.Errorf("restore: %w", err)
+		}
+	case len(args) == 3 && args[0] == "account" && args[1] == "disable":
+		id, err := strconv.ParseInt(args[2], 10, 64)
+		if err != nil || id <= 0 {
+			return errors.New("用户 ID 必须为正整数")
+		}
+		if err := chat.DisableLocalAccount(ctx, database, id); err != nil {
+			return fmt.Errorf("account disable: %w", err)
+		}
+		slog.Info("账号已停用", "user_id", id)
+	default:
+		return errors.New("用法: radishchat [backup <备份文件> | restore <备份文件> | account disable <用户 ID>]")
 	}
 	return nil
 }

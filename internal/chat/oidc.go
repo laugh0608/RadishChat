@@ -206,10 +206,14 @@ func (s *Server) oidcCallback(w http.ResponseWriter, r *http.Request) {
 				return err
 			}
 		}
-		return insertSession(ctx, tx, userID, token)
+		return insertSession(ctx, tx, userID, token, nil)
 	})
 	if errors.Is(err, errRegistrationClosed) {
 		oidcResult(w, r, "closed")
+		return
+	}
+	if errors.Is(err, errAccountUnavailable) {
+		oidcResult(w, r, "invalid")
 		return
 	}
 	if err != nil {

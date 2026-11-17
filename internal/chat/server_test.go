@@ -375,6 +375,15 @@ func TestRadishOIDCBrowserFlow(t *testing.T) {
 	if first != second {
 		t.Fatal("existing external account cannot log in with invite-only registration")
 	}
+	if err := DisableLocalAccount(t.Context(), i.cfg.Database, second.ID); err == nil || !strings.Contains(err.Error(), "不是本地密码账号") {
+		t.Fatalf("external account maintenance returned %v", err)
+	}
+	call(t, client, i.host.URL, "GET", "/me", nil, 200)
+	if _, err := i.s.db.Exec("UPDATE users SET status='disabled' WHERE id=?", second.ID); err != nil {
+		t.Fatal(err)
+	}
+	redirect(client, begin(), "/?login=invalid")
+	call(t, client, i.host.URL, "GET", "/me", nil, 401)
 	mu.Lock()
 	subject = "unregistered-radish-user"
 	mu.Unlock()

@@ -15,7 +15,8 @@ import (
 const (
 	botSchemaVersion             = 4
 	botInstallationSchemaVersion = 5
-	currentSchemaVersion         = 7
+	accountStateSchemaVersion    = 8
+	currentSchemaVersion         = accountStateSchemaVersion
 )
 
 const schemaV1 = `
@@ -166,6 +167,18 @@ CREATE INDEX messages_room ON messages(room_id, id DESC);
 PRAGMA user_version = 7;
 `
 
+const migrateV7ToV8 = `
+ALTER TABLE users ADD COLUMN status TEXT NOT NULL DEFAULT 'active'
+  CHECK (status IN ('active','recovery_required','disabled'));
+CREATE INDEX sessions_user ON sessions(user_id);
+CREATE TABLE account_recovery_codes (
+  user_id INTEGER PRIMARY KEY REFERENCES users(id),
+  token_hash BLOB NOT NULL CHECK (typeof(token_hash) = 'blob' AND length(token_hash) = 32),
+  expires INTEGER NOT NULL
+);
+PRAGMA user_version = 8;
+`
+
 func openDB(path string) (*sql.DB, error) {
 	path, err := filepath.Abs(path)
 	if err != nil {
@@ -226,6 +239,11 @@ func openDB(path string) (*sql.DB, error) {
 			if _, err := tx.ExecContext(ctx, migrateV6ToV7); err != nil {
 				return fmt.Errorf("SQLite 从 v6 迁移到 v7 失败: %w", err)
 			}
+			fallthrough
+		case 7:
+			if _, err := tx.ExecContext(ctx, migrateV7ToV8); err != nil {
+				return fmt.Errorf("SQLite 从 v7 迁移到 v8 失败: %w", err)
+			}
 			return nil
 		case currentSchemaVersion:
 			return nil
@@ -251,6 +269,10 @@ func sqliteDatabase(path, mode string) (*sql.DB, error) {
 	// 单实例使用一条连接；事务不得另行从 DB 取第二条连接。
 	db.SetMaxOpenConns(1)
 	return db, nil
+}
+
+type rowQuerier interface {
+	QueryRowContext(context.Context, string, ...any) *sql.Row
 }
 
 func transaction(ctx context.Context, db *sql.DB, f func(*sql.Tx) error) error {

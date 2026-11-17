@@ -1,7 +1,6 @@
 package chat
 
 import (
-	"context"
 	"database/sql"
 	"encoding/base64"
 	"errors"
@@ -23,23 +22,24 @@ type bot struct {
 }
 
 func (s *Server) listBots(w http.ResponseWriter, r *http.Request, owner user) {
-	rows, err := s.db.QueryContext(r.Context(), `SELECT id,display_name FROM bots WHERE owner_id=? ORDER BY id`, owner.ID)
-	if err != nil {
-		internal(w, "list-bots", err)
-		return
-	}
-	defer rows.Close()
 	bots := []bot{}
-	for rows.Next() {
-		var record bot
-		if err := rows.Scan(&record.ID, &record.DisplayName); err != nil {
-			internal(w, "list-bots", err)
-			return
+	err := s.userTransaction(r, owner.ID, func(tx *sql.Tx) error {
+		rows, err := tx.QueryContext(r.Context(), `SELECT id,display_name FROM bots WHERE owner_id=? ORDER BY id`, owner.ID)
+		if err != nil {
+			return err
 		}
-		bots = append(bots, record)
-	}
-	if err := rows.Err(); err != nil {
-		internal(w, "list-bots", err)
+		defer rows.Close()
+		for rows.Next() {
+			var record bot
+			if err := rows.Scan(&record.ID, &record.DisplayName); err != nil {
+				return err
+			}
+			bots = append(bots, record)
+		}
+		return rows.Err()
+	})
+	if err != nil {
+		userError(w, "list-bots", err)
 		return
 	}
 	reply(w, http.StatusOK, bots)
@@ -58,8 +58,12 @@ func (s *Server) createBot(w http.ResponseWriter, r *http.Request, owner user) {
 		return
 	}
 	record := bot{ID: randomText(16), DisplayName: name}
-	if _, err := s.db.ExecContext(r.Context(), `INSERT INTO bots(id,owner_id,display_name) VALUES (?,?,?)`, record.ID, owner.ID, record.DisplayName); err != nil {
-		internal(w, "create-bot", err)
+	err := s.userTransaction(r, owner.ID, func(tx *sql.Tx) error {
+		_, err := tx.ExecContext(r.Context(), `INSERT INTO bots(id,owner_id,display_name) VALUES (?,?,?)`, record.ID, owner.ID, record.DisplayName)
+		return err
+	})
+	if err != nil {
+		userError(w, "create-bot", err)
 		return
 	}
 	reply(w, http.StatusCreated, record)
@@ -79,18 +83,17 @@ func (s *Server) revokeBotCredential(w http.ResponseWriter, r *http.Request, own
 }
 
 func (s *Server) updateBotCredential(w http.ResponseWriter, r *http.Request, ownerID int64, tokenHash any) bool {
-	result, err := s.db.ExecContext(r.Context(), `UPDATE bots SET token_hash=? WHERE id=? AND owner_id=?`, tokenHash, r.PathValue("bot"), ownerID)
-	if err != nil {
-		internal(w, "update-bot-credential", err)
-		return false
-	}
-	updated, err := result.RowsAffected()
-	if err != nil {
-		internal(w, "update-bot-credential", err)
-		return false
-	}
-	if updated == 0 {
+	err := s.userTransaction(r, ownerID, func(tx *sql.Tx) error {
+		var id string
+		return tx.QueryRowContext(r.Context(), `UPDATE bots SET token_hash=? WHERE id=? AND owner_id=? RETURNING id`,
+			tokenHash, r.PathValue("bot"), ownerID).Scan(&id)
+	})
+	if errors.Is(err, sql.ErrNoRows) {
 		fail(w, http.StatusNotFound, "Bot 不存在")
+		return false
+	}
+	if err != nil {
+		userError(w, "update-bot-credential", err)
 		return false
 	}
 	return true
@@ -110,18 +113,14 @@ func botToken(r *http.Request) string {
 	return value
 }
 
-// Bot authentication can run inside the same transaction as an installation check.
-type botIdentityReader interface {
-	QueryRowContext(context.Context, string, ...any) *sql.Row
-}
-
-func botIdentity(r *http.Request, db botIdentityReader) (bot, error) {
+func botIdentity(r *http.Request, db rowQuerier) (bot, error) {
 	var record bot
 	token := botToken(r)
 	if token == "" {
 		return record, errBotCredential
 	}
-	err := db.QueryRowContext(r.Context(), `SELECT id,display_name FROM bots WHERE token_hash=?`, digest(token)).Scan(&record.ID, &record.DisplayName)
+	err := db.QueryRowContext(r.Context(), `SELECT b.id,b.display_name FROM bots b JOIN users owner ON owner.id=b.owner_id
+		WHERE b.token_hash=? AND owner.status<>'disabled'`, digest(token)).Scan(&record.ID, &record.DisplayName)
 	if errors.Is(err, sql.ErrNoRows) {
 		return record, errBotCredential
 	}
@@ -149,6 +148,6 @@ func botError(w http.ResponseWriter, operation string, err error) {
 	case errors.Is(err, errBotPermissionChange):
 		fail(w, http.StatusConflict, "修改权限需先移除现有安装并重新授权")
 	default:
-		internal(w, operation, err)
+		userError(w, operation, err)
 	}
 }

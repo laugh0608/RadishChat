@@ -110,7 +110,7 @@ func (s *Server) invokeBotCommand(w http.ResponseWriter, r *http.Request, u user
 	roomID := intID(r.PathValue("room"))
 	installationID := r.PathValue("installation")
 	var sequence int64
-	err := transaction(ctx, s.db, func(tx *sql.Tx) error {
+	err := s.userTransaction(r, u.ID, func(tx *sql.Tx) error {
 		member, err := botGroupMembership(r, tx, roomID, u.ID)
 		if err != nil {
 			return err

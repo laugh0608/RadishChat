@@ -101,6 +101,11 @@ func prepareDatabaseCopy(ctx context.Context, path string) error {
 		if _, err := tx.ExecContext(ctx, "DELETE FROM sessions; DELETE FROM oidc_flows"); err != nil {
 			return err
 		}
+		if version >= accountStateSchemaVersion {
+			if _, err := tx.ExecContext(ctx, "DELETE FROM account_recovery_codes"); err != nil {
+				return fmt.Errorf("清除账号恢复码: %w", err)
+			}
+		}
 		if version >= botSchemaVersion {
 			if _, err := tx.ExecContext(ctx, "UPDATE bots SET token_hash=NULL WHERE token_hash IS NOT NULL"); err != nil {
 				return fmt.Errorf("清除 Bot 凭据: %w", err)
