@@ -6,8 +6,8 @@
 
 ## 接下来的事项
 
-1. P2 稳定化。经维护者授权后推送 `dev`、发起 `dev → master` PR，等待 `Candidate Quality`，合并后回流 `dev`。[仓库治理](../governance/repository.md) · [稳定化与回流](../adr/0002-branch-pr-rulesets.md#稳定化与回流)
-2. 确认受控内测的目标实例、负责人和准入范围，部署后在目标环境复验 HTTPS、备份恢复和维护权限。[阶段出口](../planning/project-plan.md#里程碑与阶段出口) · [部署步骤](../../deploy/README.md)
+1. 完成 P2 稳定化。先核对远端分支基线，将 `fd6232d` 的本机验收记录作为 PR 证据，并确认待合入代码与已验收候选一致。经维护者授权后推送 `dev`、发起 `dev → master` PR，等最终 PR 的 `Candidate Quality` 通过后合并，再回流 `dev`。[P2 验收记录](../records/2026-11-17-p2-local-joint-acceptance.md) · [稳定化与回流](../adr/0002-branch-pr-rulesets.md#稳定化与回流)
+2. 准备受控内测。确认目标实例、负责人、受邀成员和 HTTPS 入口，部署或升级前准备可恢复的备份。在目标环境核对准入、备份恢复和维护权限后再向受邀成员开放。[阶段出口](../planning/project-plan.md#里程碑与阶段出口) · [部署步骤](../../deploy/README.md)
 
 ## 已有验收与待安排事项
 

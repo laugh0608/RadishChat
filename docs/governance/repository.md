@@ -24,7 +24,7 @@
 
 `Candidate Quality` 等待三个作业结束，仅当它们都返回 `success` 时通过。作业返回 `failure`、`cancelled` 或 `skipped`，汇总步骤即以非零状态退出。[GitHub Actions 依赖结果](https://docs.github.com/en/actions/reference/workflows-and-actions/contexts#needs-context)
 
-候选镜像、浏览器与部署验证按 [P1 验收矩阵](../planning/first-web-slice.md#p1-acceptance)记录，正式发布条件见 [OPS-03](../topics/deployment.md#ops-03)。文档与 CI 修改可运行以下仓库检查。
+稳定化 PR 应记录候选源码、镜像和实际验收范围。候选镜像、浏览器和部署证据见 [P1 验收矩阵](../planning/first-web-slice.md#p1-acceptance)及 [P2 本机联合验收](../records/2026-11-17-p2-local-joint-acceptance.md)。远端门禁以待合入 PR 上的 `Candidate Quality` 结果为准，正式发布条件见 [OPS-03](../topics/deployment.md#ops-03)。文档与 CI 修改可运行以下仓库检查。
 
 ```sh
 python3 scripts/check-repo.py

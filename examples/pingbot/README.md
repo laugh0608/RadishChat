@@ -29,7 +29,7 @@ RADISHCHAT_BOT_TOKEN_FILE="$HOME/.config/radishchat/pingbot.token" \
   -state-dir "$HOME/.local/state/radishchat/pingbot"
 ```
 
-运行环境也可用 `RADISHCHAT_BOT_TOKEN` 注入凭据，两种凭据来源任选其一。远程实例使用 HTTPS，私有 CA 用 `-ca-file /path/to/ca.pem` 添加到信任链。本机隔离测试接受回环 HTTP。群成员可从「群 Bot」面板发出 `ping`，群历史应出现一条带 Bot 标识的 `pong`。
+运行环境也可用 `RADISHCHAT_BOT_TOKEN` 注入凭据，两种凭据来源任选其一。`-instance` 填实例来源 URL，包含协议、主机及可选端口。远程实例使用 HTTPS，私有 CA 用 `-ca-file /path/to/ca.pem` 添加到信任链。本机隔离测试接受回环 HTTP。群成员可从「群 Bot」面板发出 `ping`，群历史应出现一条带 Bot 标识的 `pong`。
 
 ## 重启、重试和恢复
 

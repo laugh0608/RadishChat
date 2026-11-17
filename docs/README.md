@@ -8,6 +8,7 @@
 | 按计划转实施、验证与文档维护 | [协作规范](governance/collaboration.md) |
 | Git、CI、远端启用 | [仓库治理](governance/repository.md) |
 | 已记录的长效决定 | [产品独立与账号接入](adr/0001-product-boundary.md) · [分支、PR、Rulesets](adr/0002-branch-pr-rulesets.md) |
-| 已实现的接口 | [API v1](api/v1.md) · [Bot 命令事件](api/v1.md#bot-command-events) · [Bot 命令回复](api/v1.md#bot-command-replies) |
+| 已实现的接口 | [API v1](api/v1.md) · [Bot 命令事件](api/v1.md#bot-command-events) · [Bot 命令回复](api/v1.md#bot-command-replies) · [密码重置](api/v1.md#local-account-recovery) · [普通群消息举报](api/v1.md#group-message-reports) |
+| 部署侧维护操作 | [账号停用与恢复](../deploy/README.md#local-account-disable) · [维护审计](../deploy/README.md#maintenance-audit) · [举报审阅与结案](../deploy/README.md#message-reports) · [资料导出与到期清理](../deploy/README.md#governance-data) |
 | 探索证据 | [预览操作说明](records/2026-11-14-preview-quickstart.md) · [预览验证](status/2026-11-14-preview-verification.md) |
 | 规划与治理来源 | [兄弟项目对照记录](records/2026-11-14-planning-baseline.md) |

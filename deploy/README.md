@@ -1,10 +1,11 @@
 # 候选镜像和 HTTPS 验收
 
-在仓库根目录用 Docker 和 Docker Compose V2 构建候选镜像。记录源码提交、工作区差异、镜像 ID 和平台。发布与跨机器验收时应记录分发镜像的摘要。
+在仓库根目录用 Docker 构建候选镜像，再用 Docker Compose V2 验收。为本次候选选择一个本机镜像标签，记录源码提交、工作区差异、镜像 ID 和平台。发布与跨机器验收时应记录分发镜像的摘要。[P2 候选验收示例](../docs/records/2026-11-17-p2-local-joint-acceptance.md)
 
 ```sh
-docker build --tag radishchat:p1-candidate .
-docker image inspect --format '{{.Id}} {{.Os}}/{{.Architecture}}' radishchat:p1-candidate
+candidate_image=radishchat:candidate
+docker build --tag "$candidate_image" .
+docker image inspect --format '{{.Id}} {{.Os}}/{{.Architecture}}' "$candidate_image"
 ```
 
 ## 单实例
@@ -54,7 +55,7 @@ docker compose --env-file instance.env exec -T chat radishchat ops audit --limit
 
 成员在普通群的单条消息下选择「举报」，确认本实例的维护者可以查阅该消息后提交原因，并获得举报编号。部署维护者使用实例的现有维护身份操作。直接运行时使 `RADISHCHAT_DATABASE` 指向目标实例由同版本服务初始化或升级的数据库。Compose 安装可在同一实例安装目录为以下命令加上 `docker compose --env-file instance.env exec -T chat`。
 
-查看待处理举报。列表按编号降序，仅输出元数据。`--status` 接受 `open` 或 `closed`，省略时查询两类，关闭超过 30 天的举报超出命令查询窗口。`--limit` 默认为 50，范围 1–200。向前翻页使用 `--before` 和上一页最后的编号。
+查看待处理举报。列表按编号降序，仅输出元数据。`--status` 接受 `open` 或 `closed`，省略时查询两类。举报结案满 30 天后从常规列表和审阅窗口排除。`--limit` 默认为 50，范围 1–200。向前翻页使用 `--before` 和上一页最后的编号。
 
 ```sh
 radishchat ops reports list --status open
@@ -72,7 +73,7 @@ radishchat ops reports review 42
 radishchat ops reports close 42 account_disabled
 ```
 
-`dismissed` 用于结束处理且保留当前授权。Bot 举报经维护者和群主沟通后，使用 `referred_to_group_owner` 记录转交，群主按群权限处理安装。以原结果重跑结案可取回原记录，改用不同结果时命令返回错误。需支持旧快照恢复时，将结案编号、原消息引用、处理结果及输出中的 `closedAt` 记入受保护的维护记录。[授权与处置设计](../docs/topics/deployment.md#ops-02-first-batch) · [到期清理](#governance-data)
+`dismissed` 用于结束处理且保留当前授权。Bot 举报经维护者和群主沟通后，使用 `referred_to_group_owner` 记录转交，群主按群权限处理安装。未到期时，以原结果重跑结案可取回原记录，改用不同结果时命令返回错误。需支持旧快照恢复时，将举报编号、原消息引用、处理结果及输出中的 `closedAt` 记入受保护的维护记录。[授权与处置设计](../docs/topics/deployment.md#ops-02-first-batch) · [到期清理](#governance-data)
 
 <a id="governance-data"></a>
 
@@ -92,7 +93,7 @@ JSON 仅含账号 ID、用户名、显示名、账号状态，以及本人提交
 radishchat ops data prune
 ```
 
-将清理纳入实例的日常维护。命令以运行时间为基准，删除已结案满 30 天的举报和满 90 天的维护审计，保留待处理举报及聊天记录。输出的 `reportsDeleted` 和 `auditDeleted` 与同一事务写入的 `data.prune` 审计一致。命令失败后查明原因再重试，重复清理已处理的记录会返回零条删除。旧快照和已交付文件各自按受保护的留存流程处理。[快照恢复](#sqlite-backup-restore)
+将清理纳入实例的日常维护。到期记录先从常规查询与导出窗口排除，由维护者运行命令后才从活动库删除。命令以运行时间为基准，删除已结案满 30 天的举报和满 90 天的维护审计，保留待处理举报及聊天记录。输出的 `reportsDeleted` 和 `auditDeleted` 与同一事务写入的 `data.prune` 审计一致。命令失败后查明原因再重试，重复清理已处理的记录会返回零条删除。旧快照和已交付文件各自按受保护的留存流程处理。[快照恢复](#sqlite-backup-restore)
 
 <a id="sqlite-backup-restore"></a>
 
@@ -146,16 +147,17 @@ recovery_compose up -d --no-build --wait
 
 ## 双实例验收
 
-从仓库根目录创建一个干净安装目录，仅复制 Compose 验收配置和 Caddy 配置。该配置使用 Caddy 内部 CA、合成邀请码和两个独立命名卷。Caddy 只映射到本机回环地址，两个应用不发布端口。该环境供本机内测复跑，使用公开域名和公认 CA 的部署需在目标主机另行验收。
+从仓库根目录创建一个干净安装目录，仅复制 Compose 验收配置和 Caddy 配置。将 `candidate_image` 设为本次要复验的本机镜像标签。该配置使用 Caddy 内部 CA、合成邀请码和两个独立命名卷。Caddy 只映射到本机回环地址，两个应用不发布端口。该环境供本机内测复跑，使用公开域名和公认 CA 的部署需在目标主机另行验收。
 
 ```sh
+candidate_image=radishchat:candidate
 acceptance_dir=$(mktemp -d)
 cp deploy/compose.acceptance.yaml deploy/Caddyfile.acceptance "$acceptance_dir/"
 cd "$acceptance_dir"
 (
   umask 077
-  printf 'RADISHCHAT_IMAGE=radishchat:p1-candidate\nRADISHCHAT_ACCEPTANCE_INVITE=%s\n' \
-    "$(openssl rand -hex 24)" > acceptance.env
+  printf 'RADISHCHAT_IMAGE=%s\nRADISHCHAT_ACCEPTANCE_INVITE=%s\n' \
+    "$candidate_image" "$(openssl rand -hex 24)" > acceptance.env
 )
 
 acceptance_compose() {
